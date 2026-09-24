@@ -28,7 +28,6 @@ patches/
   FORMATS.md                # manifest + towns/industries/rivers schemas
   SCENARIO.md               # build runbook
   LOCAL-BUILD.md            # engine build + headless run
-  MIGRATION.md              # GTTD_BUILD -> HSB_BUILD
 ```
 
 ## Quickstart
@@ -71,7 +70,6 @@ HSB_BUILD=/tmp/build.json ./build/upstream/openttd -e \
 
 Details: `docs/SCENARIO.md`. 
 Formats: `docs/FORMATS.md`.
-GTTD migration: `docs/MIGRATION.md`. 
 AI agents: `mcp/` (MCP server, 9 tools).
 
 ## Principles

@@ -10,9 +10,6 @@
  * Geographic bounds come from the manifest ("bounds"), so the same binary
  * builds any region — no recompilation per map.
  *
- * Extracted and generalized from GermanyTransportTycoonDeluxe patch 06
- * (GTTD headless builder, 2026-09-24: 4096 map, 124 towns, 73 industries).
- *
  * This file is part of openTTD-HSB.
  * Licensed under the GNU General Public License, version 2.
  * See LICENSE.md for details.
@@ -103,16 +100,11 @@ void HsbPaintWater(TileIndex t, bool sea)
 	}
 }
 
-/** Resolve the manifest path: HSB_BUILD wins, GTTD_BUILD is a deprecated alias. */
+/** Resolve the manifest path: HSB_BUILD wins */
 const char *HsbManifestPath()
 {
 	const char *p = std::getenv("HSB_BUILD");
 	if (p != nullptr) return p;
-	p = std::getenv("GTTD_BUILD");
-	if (p != nullptr) {
-		Debug(misc, 0, "hsb: GTTD_BUILD is deprecated, use HSB_BUILD");
-		return p;
-	}
 	return nullptr;
 }
 

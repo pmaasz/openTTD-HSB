@@ -1,7 +1,6 @@
 # Local build + headless run (no sudo required)
 
-Proven on Ubuntu 24.04 (GCC 13, CMake 3.28, Python 3.12) via the GTTD origin
-project. `build/` is git-ignored; `/tmp/deps` + personal dir are machine state.
+Proven on Ubuntu 24.04 (GCC 13, CMake 3.28, Python 3.12). `build/` is git-ignored; `/tmp/deps` + personal dir are machine state.
 
 ## 1. Dev-stack bootstrap (apt download, no root)
 

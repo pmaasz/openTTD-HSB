@@ -12,5 +12,4 @@ Revert: `git -C openttd-upstream checkout -- .`
   `sh scripts/gen-patch.sh`. See `docs/FORMATS.md` + `docs/SCENARIO.md`.
 
 Scope: the builder intentionally does NOT lock menus, branding, or settings —
-it is a pure content pipeline. Forks like GTTD layer lock-down patches
-on top.
+it is a pure content pipeline.

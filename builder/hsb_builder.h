@@ -27,7 +27,6 @@
  * Run: HSB_BUILD=manifest.json openttd -e -c <config>
  * (config must activate the wanted NewGRFs first).
  *
- * Migration: GTTD_BUILD is accepted as a deprecated alias for HSB_BUILD.
  * Old manifests without "bounds" are rejected with a clear error — add the
  * geographic bounds your heightmap/towns were built with (see
  * scripts/build-manifest.py).
