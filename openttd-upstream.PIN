@@ -1,0 +1,6 @@
+url=https://github.com/OpenTTD/OpenTTD.git
+tag=15.3
+sha=14ec60f248547d4d062a1160f0fc26d742319888
+shallow=true
+checkout=detached HEAD at tag 15.3 (see .gitmodules [submodule "openttd-upstream"])
+verified_files=src/openttd.cpp src/CMakeLists.txt src/genworld.cpp
