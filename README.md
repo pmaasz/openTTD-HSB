@@ -5,12 +5,6 @@ Build OpenTTD scenarios deterministically by code, not by hand-clicking:
 engine functions the GUI calls: heightmap → rivers/estuaries → town JSON
 import → industries → start year → save → exit.
 
-Extracted and generalized from
-[GermanyTransportTycoonDeluxe](https://github.com/pmaasz/GermanyTransportTycoonDeluxe)
-patch 06 (verified 2026-09-24: 4096 map, 124/124 towns, 73/73 industries,
-content-deterministic rebuilds). This repo is region-agnostic: geographic
-bounds live in the manifest, not in C++.
-
 License: GPLv2 (see `LICENSE.md`) to match OpenTTD.
 
 ## Repo layout
@@ -36,9 +30,6 @@ patches/
   LOCAL-BUILD.md            # engine build + headless run
   MIGRATION.md              # GTTD_BUILD -> HSB_BUILD
 ```
-
-No example game data ships here — bring your own heightmap + towns +
-industries (see `docs/FORMATS.md`).
 
 ## Quickstart
 
@@ -78,8 +69,10 @@ HSB_BUILD=/tmp/build.json ./build/upstream/openttd -e \
 # => <personal-dir>/scenario/output.scn
 ```
 
-Details: `docs/SCENARIO.md`. Formats: `docs/FORMATS.md`.
-GTTD migration: `docs/MIGRATION.md`. AI agents: `mcp/` (MCP server, 9 tools).
+Details: `docs/SCENARIO.md`. 
+Formats: `docs/FORMATS.md`.
+GTTD migration: `docs/MIGRATION.md`. 
+AI agents: `mcp/` (MCP server, 9 tools).
 
 ## Principles
 
