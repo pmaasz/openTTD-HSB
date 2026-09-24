@@ -20,7 +20,7 @@ jobs:
       - name: Patch applies cleanly
         run: sh scripts/apply-patches.sh --check-only
       - name: Install Python deps
-        run: pip install numpy pillow
+        run: pip install numpy pillow "mcp>=2"
       - name: Smoke-test helpers
         run: |
           python3 scripts/build-heightmap.py --check-only \
@@ -28,8 +28,9 @@ jobs:
           python3 scripts/build-manifest.py --help
           python3 scripts/build-towns.py --help
           python3 scripts/validate-scenario.py --help
+          python3 mcp/test_smoke.py
       - name: Compile-check python
-        run: python3 -m compileall scripts builder 2>/dev/null || python3 -m compileall scripts
+        run: python3 -m compileall scripts builder mcp
 
   upstream:
     name: upstream ${{ matrix.os }}

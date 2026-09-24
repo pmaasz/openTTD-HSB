@@ -1,0 +1,4 @@
+# MCP server deps (mcp/requirements.txt). Scripts need numpy + pillow too.
+mcp>=2
+numpy
+pillow

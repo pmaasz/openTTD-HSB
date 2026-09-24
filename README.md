@@ -79,7 +79,7 @@ HSB_BUILD=/tmp/build.json ./build/upstream/openttd -e \
 ```
 
 Details: `docs/SCENARIO.md`. Formats: `docs/FORMATS.md`.
-GTTD migration: `docs/MIGRATION.md`.
+GTTD migration: `docs/MIGRATION.md`. AI agents: `mcp/` (MCP server, 9 tools).
 
 ## Principles
 
