@@ -36,7 +36,7 @@ HSB_BUILD=/tmp/build.json ./build/upstream/openttd -e \
 Inputs (yours, versioned): heightmap PNG, `towns.json`, `industries.json`,
 `rivers.json`. Outputs (git-ignored): `*.scn`.
 
-## Reference: 4096 build evidence (GTTD origin, 2026-09-24)
+## Reference: 4096 build evidence
 
 * Terrain 4096×4096, height 12, clockwise; ~18k water tiles carved.
 * 124/124 towns, 28 industry types, 73/73 industries, start 2025-01-01.
