@@ -1,0 +1,43 @@
+# Build outputs (never commit)
+build/
+dist/
+cmake-build-*/
+CMakeCache.txt
+CMakeFiles/
+
+# OpenTTD build artifacts (inside submodule worktree, belt & braces)
+openttd-upstream/build/
+openttd-upstream/bin/
+*.o
+*.a
+
+# Game binaries / generated data (distributed via Releases, not git)
+*.scn
+*.sav
+*.png
+*.tif
+*.tiff
+*.grf
+!docs/img/*.png
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# Editors / OS
+.idea/
+.vscode/
+*.sw?
+.DS_Store
+Thumbs.db
+
+# Secrets / local env
+.env.local
+*.pem
+
+# Builder manifest (machine-specific absolute paths, generated on demand)
+build-manifest.json
+*-manifest.json

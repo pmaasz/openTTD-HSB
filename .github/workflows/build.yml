@@ -1,0 +1,63 @@
+name: build
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  scripts:
+    name: pin + patch check + scripts (ubuntu)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Verify upstream pin
+        run: sh scripts/fetch-upstream.sh
+      - name: Patch applies cleanly
+        run: sh scripts/apply-patches.sh --check-only
+      - name: Install Python deps
+        run: pip install numpy pillow
+      - name: Smoke-test helpers
+        run: |
+          python3 scripts/build-heightmap.py --check-only \
+            --lat-min 47.0 --lat-max 55.5 --lon-min 4.0 --lon-max 15.5
+          python3 scripts/build-manifest.py --help
+          python3 scripts/build-towns.py --help
+          python3 scripts/validate-scenario.py --help
+      - name: Compile-check python
+        run: python3 -m compileall scripts builder 2>/dev/null || python3 -m compileall scripts
+
+  upstream:
+    name: upstream ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022, macos-15]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - name: Install deps (linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build libsdl2-dev libpng-dev zlib1g-dev libfreetype6-dev libfluidsynth-dev
+      - name: Install deps (macos)
+        if: runner.os == 'macOS'
+        run: brew install cmake ninja sdl2 libpng freetype fluid-synth || true
+      - name: Install deps (windows)
+        if: runner.os == 'Windows'
+        run: choco install cmake ninja -y || true
+      - name: Apply HSB patch
+        run: |
+          git -C openttd-upstream apply ../patches/01-headless-scenario-builder.diff
+          git -C openttd-upstream diff --stat
+      - name: Configure
+        run: cmake -S openttd-upstream -B build/upstream -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DOPTION_DEDICATED=OFF
+      - name: Build
+        run: cmake --build build/upstream -j 2

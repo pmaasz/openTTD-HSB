@@ -1,0 +1,4 @@
+[submodule "openttd-upstream"]
+	path = openttd-upstream
+	url = https://github.com/OpenTTD/OpenTTD.git
+	shallow = true
