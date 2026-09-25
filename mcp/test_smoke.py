@@ -16,6 +16,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 from mcp.server.mcpserver.exceptions import ToolError
+from pydantic import TypeAdapter, ValidationError
 
 
 def check(name, result):
@@ -93,6 +94,12 @@ def run_smoke(temp_root):
                            lon_min=30.0, lon_max=40.0),
         "unordered bounds",
     )
+    try:
+        TypeAdapter(hsb.HeightmapSize).validate_python(65)
+    except ValidationError:
+        pass
+    else:
+        raise AssertionError("non-power-of-two heightmap size was accepted")
     expect_value_error(
         lambda: hsb.RiverSegment(name="Bad", kind="ocean", width=1,
                                  waypoints=[(18.0, 32.0), (12.0, 38.0)]),
@@ -229,6 +236,11 @@ def run_smoke(temp_root):
         assert len(names_path.read_text(encoding="utf-8").splitlines()) == 2
         if geocode_mode == "missing":
             output = "Alpha,18.0,32.0,90000,0,estimate\n"
+        elif geocode_mode == "invalid":
+            output = (
+                "Alpha,18.0,32.0,90000,0,estimate\n"
+                "Beta,nan,38.0,4500,0,estimate\n"
+            )
         else:
             output = all_rows
         return {"ok": geocode_mode != "failed", "returncode":
@@ -246,6 +258,11 @@ def run_smoke(temp_root):
         assert missing_result["expected_rows"] == 2, missing_result
         print("[smoke] geocode missing-row rejection: OK")
 
+        geocode_mode = "invalid"
+        invalid_result = hsb.do_geocode(queries)
+        assert not invalid_result["ok"], invalid_result
+        print("[smoke] geocode invalid coordinates: OK")
+
         geocode_mode = "failed"
         failed_result = hsb.do_geocode(queries)
         assert not failed_result["ok"], failed_result
@@ -259,6 +276,15 @@ def run_smoke(temp_root):
     personal.mkdir()
     config = personal / "hsb-builder.cfg"
     config.write_text("[game_scripts]\n", encoding="utf-8")
+    relative_manifest = work / "relative-source.json"
+    relative_data = dict(manifest_data)
+    relative_data["towns"] = "outputs/towns.json"
+    relative_manifest.write_text(json.dumps(relative_data), encoding="utf-8")
+    relative_result = hsb.do_run_builder("relative-source.json",
+                                         "personal/hsb-builder.cfg")
+    assert not relative_result["ok"], relative_result
+    assert "absolute" in relative_result.get("error", ""), relative_result
+
     missing_manifest = work / "missing-source.json"
     missing_data = dict(manifest_data)
     missing_data["towns"] = str(work / "missing-towns.json")

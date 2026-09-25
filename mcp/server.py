@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import csv
 import json
+import math
 import os
 import shutil
 import stat
@@ -27,7 +28,7 @@ import tempfile
 from pathlib import Path
 from typing import Annotated, Any, Literal, Optional
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import AfterValidator, BaseModel, Field, field_validator, model_validator
 
 try:
     from mcp.server.mcpserver import MCPServer
@@ -47,9 +48,17 @@ Population = Annotated[int, Field(ge=1, le=2_147_483_647)]
 PathArg = Annotated[str, Field(min_length=1, max_length=4096)]
 Timeout = Annotated[int, Field(ge=1, le=86_400)]
 Zoom = Annotated[int, Field(ge=1, le=22)]
-HeightmapSize = Annotated[int, Field(ge=64, le=4096)]
+
+
+def _power_of_two(value: int) -> int:
+    if value & (value - 1) != 0:
+        raise ValueError("heightmap size must be a power of two")
+    return value
+
+
+HeightmapSize = Annotated[int, Field(ge=64, le=4096), AfterValidator(_power_of_two)]
 StartYear = Annotated[int, Field(ge=1920, le=4095)]
-Seed = Annotated[int, Field(ge=0, le=4_294_967_295)]
+Seed = Annotated[int, Field(ge=0, le=4_294_967_294)]
 IndustrySearchRadius = Annotated[int, Field(ge=1, le=512)]
 Rotation = Literal["clockwise", "counter-clockwise"]
 IndustryTypes = Annotated[str, Field(max_length=10_000)]
@@ -322,8 +331,13 @@ def do_geocode(queries: GeocodeQueries, suffix: str = "",
         elif line and not line.startswith("["):
             try:
                 name, lat, lon, pop, city, source = line.split(",")
-                rows.append({"name": name, "lat": float(lat),
-                             "lon": float(lon), "pop_real": int(pop),
+                lat_value, lon_value = float(lat), float(lon)
+                if (not math.isfinite(lat_value) or not math.isfinite(lon_value)
+                        or not -90.0 <= lat_value <= 90.0
+                        or not -180.0 <= lon_value <= 180.0):
+                    raise ValueError("geocoder returned invalid coordinates")
+                rows.append({"name": name, "lat": lat_value,
+                             "lon": lon_value, "pop_real": int(pop),
                              "city": city == "1", "source": source})
             except ValueError:
                 pass
@@ -484,6 +498,8 @@ def do_run_builder(manifest: PathArg, config: PathArg,
             raw_path = manifest_data.get(key)
             if not isinstance(raw_path, str) or not raw_path:
                 raise ValueError(f"manifest {key} must be a path string")
+            if not Path(raw_path).is_absolute():
+                raise ValueError(f"manifest {key} must be an absolute path")
             source_path = _confined_path(raw_path, f"manifest {key}")
             _regular_file(source_path, f"manifest {key}")
             source_name = _filename(Path(raw_path).name, f"manifest {key} basename")
@@ -495,6 +511,8 @@ def do_run_builder(manifest: PathArg, config: PathArg,
                 continue
             if not isinstance(raw_path, str):
                 raise ValueError(f"manifest {key} must be a path string or null")
+            if not Path(raw_path).is_absolute():
+                raise ValueError(f"manifest {key} must be an absolute path")
             source_path = _confined_path(raw_path, f"manifest {key}")
             _regular_file(source_path, f"manifest {key}")
             source_specs.append((key, "", source_path))

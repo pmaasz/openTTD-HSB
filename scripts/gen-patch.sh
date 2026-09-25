@@ -23,10 +23,10 @@ case "$#" in
     ;;
 esac
 if [ ! -d "$DIR/src" ]; then
-  echo "[gen-patch] submodule not checked out; run: git submodule update --init --depth 1" >&2
+  echo "[gen-patch] submodule not checked out; run: git -C '$ROOT' submodule update --init --depth 1" >&2
   exit 1
 fi
-upstream_status=$(git -C "$DIR" status --porcelain)
+upstream_status=$(git -C "$DIR" status --porcelain --untracked-files=all)
 if [ -n "$upstream_status" ]; then
   echo "[gen-patch] upstream worktree is dirty; revert it first (see patches/README.md)" >&2
   exit 1
@@ -40,7 +40,7 @@ clean_upstream()
   git -C "$DIR" reset -q >/dev/null 2>&1 || :
   git -C "$DIR" checkout -- src/CMakeLists.txt src/genworld.cpp src/openttd.cpp >/dev/null 2>&1 || :
   rm -f "$DIR/src/hsb_builder.h" "$DIR/src/hsb_builder.cpp" >/dev/null 2>&1 || :
-  remaining=$(git -C "$DIR" status --porcelain) || return 1
+  remaining=$(git -C "$DIR" status --porcelain --untracked-files=all) || return 1
   if [ -n "$remaining" ]; then
     echo "[gen-patch] cleanup failed; upstream is still dirty" >&2
     return 1
@@ -105,7 +105,7 @@ q.write_text(u)
 print("[gen-patch] anchors applied")
 PY
 git -C "$DIR" add -N src/hsb_builder.h src/hsb_builder.cpp
-git -C "$DIR" diff > "$GENERATED"
+git -C "$DIR" diff --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/ > "$GENERATED"
 clean_upstream
 git -C "$DIR" apply --check "$GENERATED"
 if [ "$CHECK" -eq 1 ]; then

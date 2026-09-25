@@ -15,7 +15,7 @@ is recorded in the debug CSV.
 
 Bounds (--lat-min/max, --lon-min/max) MUST match scripts/build-heightmap.py.
 
-Generalized from GermanyTransportTycoonDeluxe scripts/build-towns.py.
+Derived from the upstream town-import workflow.
 This file is part of openTTD-HSB (GPLv2, see LICENSE.md).
 """
 import argparse
@@ -47,6 +47,9 @@ def geocode(name, cache, country_suffix="", sleep=1.1):
     if not data:
         raise RuntimeError(f"geocode: no result for {name!r}")
     lat, lon = float(data[0]["lat"]), float(data[0]["lon"])
+    if not (math.isfinite(lat) and math.isfinite(lon)
+            and -90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0):
+        raise RuntimeError(f"geocode: invalid coordinates for {name!r}")
     cache[name] = (lat, lon)
     return lat, lon
 
@@ -100,17 +103,26 @@ def main(argv=None):
 
     if args.geocode:
         cache = {}
+        successes = 0
+        failures = 0
         with open(args.geocode, encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
                 if not line or line.startswith("#"):
                     continue
-                name, pop = [s.strip() for s in line.split(",", 1)]
+                name = line
                 try:
+                    name, pop = [s.strip() for s in line.split(",", 1)]
+                    if not name or not pop.isdigit() or int(pop) < 1:
+                        raise ValueError("name and positive integer population are required")
                     lat, lon = geocode(name, cache, country_suffix=args.geocode_suffix)
                     print(f"{name},{lat:.4f},{lon:.4f},{pop},0,estimate")
+                    successes += 1
                 except Exception as e:  # noqa: BLE001 - report and continue
-                    print(f"# FAILED {name}: {e}")
+                    failures += 1
+                    print(f"# FAILED {name!r}: {e}")
+        if failures > 0 or successes == 0:
+            return 1
         return 0
 
     bounds = (args.lat_min, args.lat_max, args.lon_min, args.lon_max)
@@ -139,8 +151,17 @@ def main(argv=None):
     towns, debug = [], []
     water_fails = []
     with open(args.cities, encoding="utf-8") as f:
-        for row in csv.DictReader(f):
+        reader = csv.DictReader(f)
+        required = {"name", "lat", "lon", "pop_real", "city", "source"}
+        if not reader.fieldnames or not required <= set(reader.fieldnames):
+            print("error: cities.csv must contain name, lat, lon, pop_real, city, and source", file=sys.stderr)
+            return 1
+        for row in reader:
             try:
+                if type(row.get("name")) is not str or not row["name"].strip():
+                    raise ValueError("name must be a nonempty string")
+                if row["city"] not in ("0", "1"):
+                    raise ValueError("city must be 0 or 1")
                 pop_real = int(row["pop_real"])
                 lat, lon = float(row["lat"]), float(row["lon"])
             except (KeyError, TypeError, ValueError) as exc:

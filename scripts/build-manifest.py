@@ -21,6 +21,8 @@ import stat
 import sys
 import tempfile
 
+from PIL import Image
+
 errors = []
 
 
@@ -53,6 +55,22 @@ def is_regular_file(path, label):
     return True
 
 
+def validate_heightmap(path):
+    if not is_regular_file(path, "heightmap"):
+        return
+    try:
+        with Image.open(path) as image:
+            valid = (image.format == "PNG" and image.mode == "L"
+                     and image.size[0] == image.size[1]
+                     and 64 <= image.size[0] <= 4096
+                     and image.size[0] & (image.size[0] - 1) == 0)
+            if not valid:
+                fail(f"heightmap must be PNG, grayscale, square, power-of-2, "
+                     f"and 64..4096 pixels, got {image.format} {image.mode} {image.size[0]}x{image.size[1]}")
+    except (OSError, ValueError) as exc:
+        fail(f"heightmap unreadable: {path}: {exc}")
+
+
 def validate_bounds(lat_min, lat_max, lon_min, lon_max):
     bounds = (lat_min, lat_max, lon_min, lon_max)
     if not all(math.isfinite(value) for value in bounds):
@@ -75,7 +93,8 @@ def validate_save_name(name):
 
 def validate_output(path, reserved_paths):
     absolute = os.path.abspath(path)
-    if absolute in reserved_paths:
+    canonical = os.path.realpath(absolute)
+    if any(canonical == os.path.realpath(reserved) for reserved in reserved_paths):
         fail(f"output path must differ from manifest inputs: {absolute}")
         return False
     if os.path.lexists(absolute):
@@ -119,8 +138,8 @@ def main(argv=None):
         fail("--start-year must be in 0..5000000")
     if not 1 <= args.height <= 255:
         fail("--height must be in 1..255")
-    if not 0 <= args.seed <= 0xFFFFFFFF:
-        fail("--seed must be in 0..4294967295")
+    if not 0 <= args.seed < 0xFFFFFFFF:
+        fail("--seed must be in 0..4294967294")
     if not 1 <= args.industry_search_radius <= 512:
         fail("--industry-search-radius must be in 1..512")
     validate_save_name(args.save)
@@ -135,6 +154,7 @@ def main(argv=None):
     validate_output(args.out, set(input_paths.values()))
     for label, path in input_paths.items():
         is_regular_file(path, label)
+    validate_heightmap(input_paths["heightmap"])
 
     if errors:
         print(f"[build-manifest] {len(errors)} FAILURE(S)", file=sys.stderr)

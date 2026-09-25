@@ -54,14 +54,12 @@ jobs:
           sudo apt-get install -y cmake ninja-build libsdl2-dev libpng-dev zlib1g-dev libfreetype6-dev libfluidsynth-dev
       - name: Install deps (macos)
         if: runner.os == 'macOS'
-        run: brew install cmake ninja sdl2 libpng freetype fluid-synth || true
+        run:           brew install cmake ninja sdl2 libpng freetype fluid-synth
       - name: Install deps (windows)
         if: runner.os == 'Windows'
-        run: choco install cmake ninja -y || true
+        run:           choco install cmake ninja -y
       - name: Apply HSB patch
-        run: |
-          git -C openttd-upstream apply ../patches/01-headless-scenario-builder.diff
-          git -C openttd-upstream diff --stat
+        run: sh scripts/apply-patches.sh
       - name: Configure
         run: cmake -S openttd-upstream -B build/upstream -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DOPTION_DEDICATED=OFF
       - name: Build

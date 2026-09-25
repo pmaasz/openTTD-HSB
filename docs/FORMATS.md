@@ -33,8 +33,8 @@ tile mapping.
 * `heightmap_height`: optional, default 12.
 * `heightmap_rotation`: optional, `clockwise` (default) or
   `counter-clockwise`. Must match the rotation you would use by hand.
-* `seed`: optional, default 20250924. Fixed seed ⇒ deterministic rebuilds
-  (up to engine RNG tail metadata).
+* `seed`: optional, default 20250924, range 0–4294967294. Fixed seed ⇒
+  deterministic rebuilds (up to engine RNG tail metadata).
 * `industry_search_radius`: optional, default 32, range 1–512. Spiral fallback
   radius in tiles around each industry anchor.
 * `save`: scenario filename written into the `scenario/` dir.

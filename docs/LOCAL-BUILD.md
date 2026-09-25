@@ -40,7 +40,7 @@ sh scripts/apply-patches.sh   # or --check-only for CI
 cmake -S openttd-upstream -B build/upstream -DCMAKE_BUILD_TYPE=Release \
   -DOPTION_DEDICATED=OFF -DCMAKE_PREFIX_PATH=/tmp/deps/root/usr \
   "-DCMAKE_EXE_LINKER_FLAGS=-L/tmp/deps/root/usr/lib/x86_64-linux-gnu -lbrotlidec -lbrotlicommon -lbz2"
-cmake --build build/upstream -j$(nproc)   # ~30-45 min first time, incremental after
+cmake --build build/upstream -j2   # ~30-45 min first time, incremental after
 ```
 
 Notes: CMake may resolve freetype to the static archive (hence the explicit

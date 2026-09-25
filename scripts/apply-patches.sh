@@ -5,8 +5,21 @@
 set -eu
 ROOT="$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)"
 DIR="$ROOT/openttd-upstream"
+case "$#" in
+  0) ;;
+  1)
+    if [ "$1" != "--check-only" ]; then
+      echo "usage: sh scripts/apply-patches.sh [--check-only]" >&2
+      exit 2
+    fi
+    ;;
+  *)
+    echo "usage: sh scripts/apply-patches.sh [--check-only]" >&2
+    exit 2
+    ;;
+esac
 if [ ! -d "$DIR/src" ]; then
-  echo "[apply-patches] submodule not checked out; run: git submodule update --init --depth 1" >&2
+  echo "[apply-patches] submodule not checked out; run: git -C '$ROOT' submodule update --init --depth 1" >&2
   exit 1
 fi
 if [ "${1:-}" = "--check-only" ]; then
@@ -16,5 +29,5 @@ if [ "${1:-}" = "--check-only" ]; then
 fi
 git -C "$DIR" apply "$ROOT/patches/01-headless-scenario-builder.diff"
 echo "[apply-patches] applied 01-headless-scenario-builder.diff"
-git -C "$DIR" diff --stat
-echo "[apply-patches] to revert: git -C openttd-upstream checkout -- . && git -C openttd-upstream clean -fd src/hsb_builder.*"
+git -C "$DIR" apply --stat "$ROOT/patches/01-headless-scenario-builder.diff"
+echo "[apply-patches] to revert: git -C '$DIR' apply --reverse '$ROOT/patches/01-headless-scenario-builder.diff'"

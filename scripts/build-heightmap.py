@@ -11,7 +11,7 @@ depends only on cached tiles + fixed constants.
 
 Bounds example (Germany): --lat-min 47.0 --lat-max 55.5 --lon-min 4.0 --lon-max 15.5
 
-Generalized from GermanyTransportTycoonDeluxe scripts/build-heightmap.py.
+Derived from the Terrarium elevation-tile pipeline.
 This file is part of openTTD-HSB (GPLv2, see LICENSE.md).
 """
 import argparse
@@ -26,6 +26,7 @@ from PIL import Image
 
 TILE_URL = "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"
 TILE_SIZE = 256
+MAX_MOSAIC_PIXELS = 16 * 1024 * 1024
 
 # Normalization: elevations clipped to [0, E_CLIP] then gamma-curved to 1..255.
 # Sea (elev <= 0) is always gray 0. Gamma < 1 lifts mid-hills while
@@ -178,12 +179,19 @@ def main(argv=None):
         print("[build-heightmap] toolchain OK (urllib+numpy+PIL)")
         return 0
 
+    if os.path.abspath(args.out) == os.path.abspath(args.master_out):
+        print("error: --out and --master-out must be different files", file=sys.stderr)
+        return 2
+
     z = args.zoom
     x0, x1 = lon_to_xtile(lon_min, z), lon_to_xtile(lon_max, z)
     y0, y1 = lat_to_ytile(lat_max, z), lat_to_ytile(lat_min, z)
     nx, ny = x1 - x0 + 1, y1 - y0 + 1
     if nx <= 0 or ny <= 0 or nx * ny > 4096:
         print(f"error: requested mosaic needs {nx}x{ny} tiles; maximum is 4096", file=sys.stderr)
+        return 2
+    if nx * ny * TILE_SIZE * TILE_SIZE > MAX_MOSAIC_PIXELS:
+        print(f"error: requested mosaic exceeds {MAX_MOSAIC_PIXELS} source pixels", file=sys.stderr)
         return 2
     print(f"[build-heightmap] zoom={z} tiles x={x0}..{x1} y={y0}..{y1} ({nx}x{ny} tiles)")
 
@@ -212,6 +220,9 @@ def main(argv=None):
     cx0, cx1 = int(frac_lon(lon_min) * w), int(frac_lon(lon_max) * w)
     cy0, cy1 = int(frac_lat(lat_max) * h), int(frac_lat(lat_min) * h)
     cropped = mosaic[cy0:cy1, cx0:cx1]
+    if cropped.size == 0:
+        print("error: bounds resolve to fewer than one source pixel", file=sys.stderr)
+        return 2
     print(f"[build-heightmap] cropped {cropped.shape[1]}x{cropped.shape[0]} px")
 
     if cropped.max() <= 0:
@@ -233,12 +244,12 @@ def main(argv=None):
 
     img = Image.fromarray(gray, mode="L")
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
-    img.save(args.out)
+    img.save(args.out, format="PNG")
     print(f"[build-heightmap] wrote {args.out} ({args.size}x{args.size} L)")
 
     master = Image.fromarray(linear.astype(np.float32))
     os.makedirs(os.path.dirname(os.path.abspath(args.master_out)), exist_ok=True)
-    master.save(args.master_out)
+    master.save(args.master_out, format="TIFF")
     print(f"[build-heightmap] wrote {args.master_out} (float32 master)")
     return 0
 

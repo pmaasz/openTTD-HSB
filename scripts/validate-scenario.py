@@ -14,7 +14,7 @@ Pre-editor checks (default run, CI-green without a .scn):
 
 Post-build: --scenario <output.scn> checks file size sanity.
 
-Generalized from GermanyTransportTycoonDeluxe scripts/validate-scenario.py.
+Derived from the scenario-editor validation workflow.
 This file is part of openTTD-HSB (GPLv2, see LICENSE.md).
 """
 import argparse
@@ -30,6 +30,8 @@ from PIL import Image
 
 errors = []
 missing = object()
+MAX_TOWN_NAME_CHARS = 31
+MAX_TOWN_POPULATION = 0xFFFFFFFF
 
 
 def fail(msg):
@@ -128,10 +130,10 @@ def load_heightmap(path, strict):
             f.seek(0)
             with Image.open(f) as img:
                 w, h = img.size
-                if (img.mode != "L" or w != h or w < 64 or w > 4096
+                if (img.format != "PNG" or img.mode != "L" or w != h or w < 64 or w > 4096
                         or w & (w - 1)):
-                    fail(f"heightmap {path}: must be grayscale, square, power-of-2, "
-                         f"and 64..4096 pixels, got {img.mode} {w}x{h}")
+                    fail(f"heightmap {path}: must be PNG, grayscale, square, power-of-2, "
+                         f"and 64..4096 pixels, got {img.format} {img.mode} {w}x{h}")
                     return gray, w, h
                 gray = np.asarray(img)
     except FileNotFoundError:
@@ -169,15 +171,18 @@ def validate_towns(path):
             continue
 
         name = town.get("name")
-        if type(name) is not str or not name.strip():
-            fail(f"towns.json: entry {index} must have a nonempty string name")
+        if (type(name) is not str or not name.strip()
+                or len(name) > MAX_TOWN_NAME_CHARS):
+            fail(f"towns.json: entry {index} must have a nonempty name of at most "
+                 f"{MAX_TOWN_NAME_CHARS} characters")
         else:
             names.append(name)
             if name in seen_names:
                 fail(f"towns.json: duplicate name {name!r}")
             seen_names.add(name)
 
-        if type(town.get("population")) is not int or town["population"] < 1:
+        if (type(town.get("population")) is not int or town["population"] < 1
+                or town["population"] > MAX_TOWN_POPULATION):
             fail(f"towns.json: bad population for {name!r}")
         if type(town.get("city")) is not bool:
             fail(f"towns.json: bad city flag for {name!r}")
@@ -252,6 +257,9 @@ def validate_industries(path, lat_min, lat_max, lon_min, lon_max,
             continue
 
         near = industry.get("near", "<unknown>")
+        if type(near) is not str:
+            fail(f"industries.json: near must be a string ({industry.get('near')})")
+            near = "<unknown>"
         industry_type = industry.get("type")
         valid_type = type(industry_type) is str and bool(industry_type.strip())
         if not valid_type:
@@ -299,6 +307,8 @@ def validate_rivers(path, lat_min, lat_max, lon_min, lon_max):
             fail(f"rivers.json: entry {index} must be an object")
             continue
         name = segment.get("name", f"entry {index}")
+        if type(segment.get("name")) is not str or not segment["name"].strip():
+            fail(f"rivers.json: entry {index} must have a nonempty string name")
         if type(segment.get("class")) is not str or segment["class"] not in ("river", "sea"):
             fail(f"rivers.json: bad class in {name!r}")
         width = segment.get("width")

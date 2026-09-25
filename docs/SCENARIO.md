@@ -10,6 +10,9 @@ town JSON import → industries → start year → save → exit.
 Prerequisites: built engine (`docs/LOCAL-BUILD.md`), wanted NewGRFs + GS in
 the personal dir, heightmap PNG + `towns.json` in `scenario/heightmap/`.
 
+Provide your own `cities.csv`, `industries.json`, and `rivers.json`; the
+accepted schemas are in `docs/FORMATS.md`.
+
 ```sh
 # 1. game data in place (regenerate if sources changed)
 python3 scripts/build-heightmap.py \

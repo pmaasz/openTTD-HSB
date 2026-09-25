@@ -40,9 +40,11 @@ sh scripts/fetch-upstream.sh
 # 1. patches + build (see docs/LOCAL-BUILD.md for no-sudo deps)
 sh scripts/apply-patches.sh
 cmake -S openttd-upstream -B build/upstream -DCMAKE_BUILD_TYPE=Release
-cmake --build build/upstream -j$(nproc)
+cmake --build build/upstream -j2
 
 # 2. data (any region — bounds must agree everywhere)
+# Provide your own cities.csv, industries.json, and rivers.json first; their
+# schemas are documented in docs/FORMATS.md.
 python3 scripts/build-heightmap.py \
   --lat-min 47.0 --lat-max 55.5 --lon-min 4.0 --lon-max 15.5 \
   --zoom 9 --size 4096 --out /tmp/map-4096.png --master-out /tmp/map-master.tif
