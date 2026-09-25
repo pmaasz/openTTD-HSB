@@ -17,7 +17,7 @@
  *   "heightmap_rotation": "clockwise",       // optional: clockwise (default)
  *                                            // or counter-clockwise
  *   "seed": 20250924,                        // optional, fixed generation seed
- *   "industry_search_radius": 32,            // optional, spiral fallback tiles
+ *   "industry_search_radius": 32,            // optional 1..512 spiral fallback tiles
  *   "save":       "output.scn"
  * }
  * heightmap/towns are resolved by basename through the engine file search
