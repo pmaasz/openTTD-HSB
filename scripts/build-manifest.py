@@ -15,11 +15,83 @@ This file is part of openTTD-HSB (GPLv2, see LICENSE.md).
 """
 import argparse
 import json
+import math
 import os
+import stat
 import sys
+import tempfile
+
+errors = []
+
+
+def fail(msg):
+    errors.append(msg)
+    print(f"[build-manifest] FAIL: {msg}", file=sys.stderr)
+
+
+def is_regular_file(path, label):
+    try:
+        file_stat = os.stat(path)
+    except (OSError, ValueError) as exc:
+        if isinstance(exc, FileNotFoundError):
+            fail(f"{label} missing: {path}")
+        else:
+            fail(f"{label} unreadable: {path}: {exc}")
+        return False
+    if not stat.S_ISREG(file_stat.st_mode):
+        fail(f"{label} is not a regular file: {path}")
+        return False
+    try:
+        with open(path, "rb") as f:
+            if not stat.S_ISREG(os.fstat(f.fileno()).st_mode):
+                fail(f"{label} is not a regular file: {path}")
+                return False
+            f.read(1)
+    except (OSError, ValueError) as exc:
+        fail(f"{label} unreadable: {path}: {exc}")
+        return False
+    return True
+
+
+def validate_bounds(lat_min, lat_max, lon_min, lon_max):
+    bounds = (lat_min, lat_max, lon_min, lon_max)
+    if not all(math.isfinite(value) for value in bounds):
+        fail("WGS84 bounds must be finite")
+        return
+    if not (-90 <= lat_min <= 90 and -90 <= lat_max <= 90
+            and -180 <= lon_min <= 180 and -180 <= lon_max <= 180):
+        fail("WGS84 bounds require latitude in [-90, 90] and longitude in [-180, 180]")
+        return
+    if not (lat_min < lat_max and lon_min < lon_max):
+        fail("bounds must satisfy lat_min < lat_max and lon_min < lon_max")
+
+
+def validate_save_name(name):
+    if (type(name) is not str or not name or not name.strip()
+            or name in (".", "..") or "/" in name or "\\" in name
+            or ":" in name or "\x00" in name or os.path.basename(name) != name):
+        fail("--save must be a nonempty basename without path traversal")
+
+
+def validate_output(path, reserved_paths):
+    absolute = os.path.abspath(path)
+    if absolute in reserved_paths:
+        fail(f"output path must differ from manifest inputs: {absolute}")
+        return False
+    if os.path.lexists(absolute):
+        try:
+            output_stat = os.stat(absolute)
+        except (OSError, ValueError) as exc:
+            fail(f"output path unreadable: {absolute}: {exc}")
+            return False
+        if not stat.S_ISREG(output_stat.st_mode):
+            fail(f"output path is not a regular file: {absolute}")
+            return False
+    return True
 
 
 def main(argv=None):
+    errors.clear()
     p = argparse.ArgumentParser(description="Write HSB builder manifest")
     p.add_argument("--heightmap", required=True, help="path to heightmap PNG (power of 2)")
     p.add_argument("--towns", required=True, help="path to towns.json (town-import format)")
@@ -42,15 +114,36 @@ def main(argv=None):
     p.add_argument("--out", default="build-manifest.json")
     args = p.parse_args(argv)
 
-    if not (args.lat_min < args.lat_max and args.lon_min < args.lon_max):
-        print("[build-manifest] bounds must satisfy lat_min < lat_max, lon_min < lon_max",
-              file=sys.stderr)
-        return 1
+    validate_bounds(args.lat_min, args.lat_max, args.lon_min, args.lon_max)
+    if not 0 <= args.start_year <= 5_000_000:
+        fail("--start-year must be in 0..5000000")
+    if not 1 <= args.height <= 255:
+        fail("--height must be in 1..255")
+    if not 0 <= args.seed <= 0xFFFFFFFF:
+        fail("--seed must be in 0..4294967295")
+    if not 1 <= args.industry_search_radius <= 512:
+        fail("--industry-search-radius must be in 1..512")
+    validate_save_name(args.save)
 
-    manifest = {
+    input_paths = {
         "heightmap": os.path.abspath(args.heightmap),
         "towns": os.path.abspath(args.towns),
         "industries": os.path.abspath(args.industries),
+    }
+    if args.rivers:
+        input_paths["rivers"] = os.path.abspath(args.rivers)
+    validate_output(args.out, set(input_paths.values()))
+    for label, path in input_paths.items():
+        is_regular_file(path, label)
+
+    if errors:
+        print(f"[build-manifest] {len(errors)} FAILURE(S)", file=sys.stderr)
+        return 1
+
+    manifest = {
+        "heightmap": input_paths["heightmap"],
+        "towns": input_paths["towns"],
+        "industries": input_paths["industries"],
         "bounds": {
             "lat_min": args.lat_min,
             "lat_max": args.lat_max,
@@ -65,16 +158,40 @@ def main(argv=None):
         "save": args.save,
     }
     if args.rivers:
-        manifest["rivers"] = os.path.abspath(args.rivers)
-    for key in ("heightmap", "towns", "industries"):
-        if not os.path.exists(manifest[key]):
-            print(f"[build-manifest] missing: {manifest[key]}", file=sys.stderr)
-            return 1
-    if args.rivers and not os.path.exists(manifest["rivers"]):
-        print(f"[build-manifest] missing rivers: {manifest['rivers']}", file=sys.stderr)
+        manifest["rivers"] = input_paths["rivers"]
+
+    try:
+        payload = json.dumps(manifest, indent=2, allow_nan=False)
+    except (TypeError, ValueError) as exc:
+        fail(f"manifest is not strict JSON: {exc}")
+        print(f"[build-manifest] {len(errors)} FAILURE(S)", file=sys.stderr)
         return 1
-    with open(args.out, "w", encoding="utf-8") as f:
-        json.dump(manifest, f, indent=2)
+
+    output_path = os.path.abspath(args.out)
+    output_parent = os.path.dirname(output_path)
+    temporary_path = None
+    try:
+        os.makedirs(output_parent, exist_ok=True)
+        descriptor, temporary_name = tempfile.mkstemp(
+            prefix=".build-manifest-", dir=output_parent)
+        temporary_path = temporary_name
+        with os.fdopen(descriptor, "w", encoding="utf-8") as output:
+            output.write(payload)
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(temporary_path, output_path)
+        temporary_path = None
+    except (OSError, UnicodeError, ValueError) as exc:
+        fail(f"cannot write output {args.out}: {exc}")
+        print(f"[build-manifest] {len(errors)} FAILURE(S)", file=sys.stderr)
+        return 1
+    finally:
+        if temporary_path is not None:
+            try:
+                os.unlink(temporary_path)
+            except FileNotFoundError:
+                pass
+
     print(f"[build-manifest] wrote {args.out}")
     return 0
 
