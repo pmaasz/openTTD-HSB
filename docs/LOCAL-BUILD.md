@@ -45,8 +45,9 @@ cmake --build build/upstream -j$(nproc)   # ~30-45 min first time, incremental a
 
 Notes: CMake may resolve freetype to the static archive (hence the explicit
 brotli/bz2 libs above). Keep the submodule pristine: verify with
-`git -C openttd-upstream status` before committing (patches are tested via
-`git apply`, then reverted).
+`git -C openttd-upstream status` before committing. Reverse an applied patch
+with `git -C openttd-upstream apply --reverse ../patches/01-headless-scenario-builder.diff`;
+this also removes the patch-created builder files.
 
 ## 3. Headless scenario build
 
@@ -64,7 +65,7 @@ HSB_BUILD=/tmp/build.json DISPLAY=:99 SDL_AUDIODRIVER=dummy SDL_VIDEODRIVER=x11 
 ```
 
 Rules learned the hard way: `-c` location defines the personal dir (a `-c`
-in /tmp reads /tmp/scenario/...); keep the submodule pristine
-(`git apply` patches, then `checkout -- .`); FixSlopes() must run after any
-direct terrain edits or town road-building asserts; newgame settings (not
-game settings) survive GenerateWorld's reset.
+in /tmp reads /tmp/scenario/...); keep the submodule pristine by reversing
+applied patches, including their newly created files; FixSlopes() must run
+after any direct terrain edits or town road-building asserts; newgame settings
+(not game settings) survive GenerateWorld's reset.

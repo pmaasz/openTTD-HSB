@@ -3,8 +3,9 @@
 # Used by CI and by developers after `git submodule update --init`.
 # Part of openTTD-HSB (GPLv2, see LICENSE.md).
 set -eu
-PIN_FILE="openttd-upstream.PIN"
-DIR="openttd-upstream"
+ROOT="$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)"
+PIN_FILE="$ROOT/openttd-upstream.PIN"
+DIR="$ROOT/openttd-upstream"
 want=$(grep '^sha=' "$PIN_FILE" | cut -d= -f2)
 if [ ! -d "$DIR/src" ]; then
   echo "[fetch-upstream] submodule not checked out; run: git submodule update --init --depth 1" >&2

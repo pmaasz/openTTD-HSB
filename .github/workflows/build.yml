@@ -11,12 +11,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          submodules: true
+          submodules: false
+      - name: Initialize fresh upstream submodule
+        run: git submodule update --init --depth 1
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - name: Verify upstream pin
         run: sh scripts/fetch-upstream.sh
+      - name: Check generated patch parity
+        run: sh scripts/gen-patch.sh --check
       - name: Patch applies cleanly
         run: sh scripts/apply-patches.sh --check-only
       - name: Install Python deps
