@@ -35,19 +35,19 @@ tile mapping.
   `counter-clockwise`. Must match the rotation you would use by hand.
 * `seed`: optional, default 20250924. Fixed seed ⇒ deterministic rebuilds
   (up to engine RNG tail metadata).
-* `industry_search_radius`: optional, default 32. Spiral fallback radius in
-  tiles around each industry anchor.
+* `industry_search_radius`: optional, default 32, range 1–512. Spiral fallback
+  radius in tiles around each industry anchor.
 * `save`: scenario filename written into the `scenario/` dir.
 
 ## towns.json — OpenTTD town-import format
 
 Array of `{name, population, city, x, y}`:
 
-* `x = row/H`, `y = col/W` — proportions, axes **swapped** vs image editors
-  (per upstream `docs/importing_town_data.md`).
+* `x = row/(H-1)`, `y = col/(W-1)` — proportions, axes **swapped** vs image
+  editors (per upstream `docs/importing_town_data.md`).
 * Pixel mapping (must match `build-heightmap.py --bounds`):
-  `col = (lon-lon_min)/(lon_max-lon_min)*W`,
-  `row = (lat_max-lat)/(lat_max-lat_min)*H`.
+  `col = (lon-lon_min)/(lon_max-lon_min)*(W-1)`,
+  `row = (lat_max-lat)/(lat_max-lat_min)*(H-1)`.
 * Built by `scripts/build-towns.py` from `cities.csv`
   (`name,lat,lon,pop_real,city,source`).
 
@@ -78,5 +78,7 @@ Array of `{name, class, width, waypoints}`:
 
 ## heightmap PNG
 
-Grayscale `L`, square, power-of-2 ≥ 64. Sea = gray 0, land = 1..255.
-Built by `scripts/build-heightmap.py` (Terrarium DEM → normalize → resize).
+Grayscale `L`, square (`W=H`), power-of-2 in 64–4096. Sea = gray 0, land = 1..255.
+Columns and rows are linearly spaced over the requested longitude and latitude
+bounds. Built by `scripts/build-heightmap.py` (Terrarium DEM → bilinear
+resample → normalize).

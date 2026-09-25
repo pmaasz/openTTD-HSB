@@ -6,7 +6,7 @@ Input CSV columns: name,lat,lon,pop_real,city,source
   city: 1 for OpenTTD cities (large metros). source: free-form provenance.
 
 Conversion (per upstream docs/importing_town_data.md):
-  lon/lat -> heightmap pixel (col,row) -> JSON x=row/H, y=col/W (axes swapped).
+  lon/lat -> heightmap pixel (col,row) -> JSON x=r/(H-1), y=c/(W-1) (axes swapped).
   Population scaling: target = max(POP_MIN, round(real / POP_DIVISOR)).
 
 Validation: every town is sampled against the built heightmap PNG; towns on
@@ -21,6 +21,7 @@ This file is part of openTTD-HSB (GPLv2, see LICENSE.md).
 import argparse
 import csv
 import json
+import math
 import os
 import sys
 import time
@@ -51,26 +52,26 @@ def geocode(name, cache, country_suffix="", sleep=1.1):
 
 
 def lonlat_to_pixel(lat, lon, w, h, lat_min, lat_max, lon_min, lon_max):
-    col = (lon - lon_min) / (lon_max - lon_min) * w
-    row = (lat_max - lat) / (lat_max - lat_min) * h
+    col = (lon - lon_min) / (lon_max - lon_min) * (w - 1)
+    row = (lat_max - lat) / (lat_max - lat_min) * (h - 1)
     return col, row
 
 
 def nearest_land(gray, col, row, max_px):
     h, w = gray.shape
     c0, r0 = int(round(col)), int(round(row))
-    if 0 <= r0 < h and 0 <= c0 < w and gray[r0, c0] > 0:
+    if 0 < r0 < h - 1 and 0 < c0 < w - 1 and gray[r0, c0] > 0:
         return c0, r0, 0
     for d in range(1, max_px + 1):
         for dr in range(-d, d + 1):
             for dc in (-d, d):
                 r, c = r0 + dr, c0 + dc
-                if 0 <= r < h and 0 <= c < w and gray[r, c] > 0:
+                if 0 < r < h - 1 and 0 < c < w - 1 and gray[r, c] > 0:
                     return c, r, d
         for dc in range(-d + 1, d):
             for dr in (-d, d):
                 r, c = r0 + dr, c0 + dc
-                if 0 <= r < h and 0 <= c < w and gray[r, c] > 0:
+                if 0 < r < h - 1 and 0 < c < w - 1 and gray[r, c] > 0:
                     return c, r, d
     return None
 
@@ -112,30 +113,50 @@ def main(argv=None):
                     print(f"# FAILED {name}: {e}")
         return 0
 
+    bounds = (args.lat_min, args.lat_max, args.lon_min, args.lon_max)
+    if (not all(math.isfinite(value) for value in bounds)
+            or not (-90.0 <= args.lat_min < args.lat_max <= 90.0)
+            or not (-180.0 <= args.lon_min < args.lon_max <= 180.0)):
+        print("error: bounds must be finite WGS84 intervals", file=sys.stderr)
+        return 2
+    if not math.isfinite(args.pop_divisor) or args.pop_divisor <= 0:
+        print("error: --pop-divisor must be finite and positive", file=sys.stderr)
+        return 2
+    if args.pop_min < 1 or args.nudge_px < 0:
+        print("error: --pop-min must be positive and --nudge-px nonnegative", file=sys.stderr)
+        return 2
+
     try:
         gray = np.asarray(Image.open(args.heightmap).convert("L"))
-    except FileNotFoundError:
-        print(f"[build-towns] heightmap {args.heightmap} missing — skipping land check")
-        if args.strict:
-            return 1
-        gray = None
-    H, W = gray.shape if gray is not None else (2048, 2048)
+    except (FileNotFoundError, OSError) as exc:
+        print(f"error: cannot read heightmap {args.heightmap}: {exc}", file=sys.stderr)
+        return 1
+    H, W = gray.shape
+    if H != W or not 64 <= H <= 4096 or H & (H - 1):
+        print(f"error: heightmap must be square power-of-2 in 64..4096, got {W}x{H}", file=sys.stderr)
+        return 1
 
     towns, debug = [], []
     water_fails = []
     with open(args.cities, encoding="utf-8") as f:
         for row in csv.DictReader(f):
-            pop_real = int(row["pop_real"])
+            try:
+                pop_real = int(row["pop_real"])
+                lat, lon = float(row["lat"]), float(row["lon"])
+            except (KeyError, TypeError, ValueError) as exc:
+                print(f"error: invalid cities.csv row: {exc}", file=sys.stderr)
+                return 1
+            if (pop_real < 1 or not math.isfinite(lat) or not math.isfinite(lon)
+                    or not (args.lat_min <= lat <= args.lat_max)
+                    or not (args.lon_min <= lon <= args.lon_max)):
+                print(f"error: invalid city coordinates or population for {row.get('name', '')!r}", file=sys.stderr)
+                return 1
             if args.sample and not (row["city"] == "1" or pop_real >= 100000):
                 continue
-            lat, lon = float(row["lat"]), float(row["lon"])
             col, row_px = lonlat_to_pixel(lat, lon, W, H,
                                           args.lat_min, args.lat_max,
                                           args.lon_min, args.lon_max)
-            if gray is None:
-                hit = (int(round(col)), int(round(row_px)), 0)
-            else:
-                hit = nearest_land(gray, col, row_px, args.nudge_px)
+            hit = nearest_land(gray, col, row_px, args.nudge_px)
             if hit is None:
                 water_fails.append(row["name"])
                 continue
@@ -145,8 +166,8 @@ def main(argv=None):
                 "name": row["name"],
                 "population": max(args.pop_min, round(pop_real / args.pop_divisor)),
                 "city": row["city"] == "1",
-                "x": r / H,
-                "y": c / W,
+                "x": r / (H - 1),
+                "y": c / (W - 1),
             })
             debug.append({
                 "name": row["name"], "lat": lat, "lon": lon,
@@ -156,6 +177,9 @@ def main(argv=None):
                 "city": row["city"], "source": row["source"],
             })
 
+    if not towns:
+        print("error: no towns were generated", file=sys.stderr)
+        return 1
     print(f"[build-towns] towns={len(towns)} cities={sum(1 for t in towns if t['city'])}")
     if water_fails:
         print(f"[build-towns] ON WATER (no land within {args.nudge_px}px): {', '.join(water_fails)}")
@@ -165,12 +189,14 @@ def main(argv=None):
 
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
     with open(args.out, "w", encoding="utf-8") as f:
-        json.dump(towns, f, ensure_ascii=False, indent=2)
-    if debug:
-        with open(args.debug_out, "w", encoding="utf-8", newline="") as f:
-            w = csv.DictWriter(f, fieldnames=list(debug[0].keys()))
-            w.writeheader()
-            w.writerows(debug)
+        json.dump(towns, f, ensure_ascii=False, indent=2, allow_nan=False)
+    os.makedirs(os.path.dirname(os.path.abspath(args.debug_out)), exist_ok=True)
+    with open(args.debug_out, "w", encoding="utf-8", newline="") as f:
+        fieldnames = ["name", "lat", "lon", "col", "row", "nudge_px",
+                      "pop_real", "pop_game", "city", "source"]
+        w = csv.DictWriter(f, fieldnames=fieldnames)
+        w.writeheader()
+        w.writerows(debug)
     nudged = sum(1 for d in debug if d["nudge_px"] > 0)
     print(f"[build-towns] wrote {args.out} + {args.debug_out} (nudged={nudged})")
     return 0
