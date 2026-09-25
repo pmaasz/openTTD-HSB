@@ -50,8 +50,18 @@ sh scripts/test-builder.sh
 ```
 
 The runner applies the patch temporarily, builds `openttd_test`, runs
-`ctest --output-on-failure`, and restores the submodule. Override the build
-directory with `HSB_TEST_BUILD_DIR` and parallelism with `HSB_TEST_JOBS`.
+`ctest --output-on-failure`, and restores the submodule. For incremental local
+work, keep the patch and build directory between runs:
+
+```sh
+brew install ccache
+HSB_KEEP_PATCH=1 HSB_TEST_JOBS=2 sh scripts/test-builder.sh
+```
+
+Use `HSB_TEST_FAST=1` to compile only the two changed builder test objects.
+The runner auto-detects `ccache`; set `CCACHE=ccache` to override it. When
+finished, restore the submodule with
+`git -C openttd-upstream apply --reverse ../patches/01-headless-scenario-builder.diff`.
 
 Notes: CMake may resolve freetype to the static archive (hence the explicit
 brotli/bz2 libs above). Keep the submodule pristine: verify with

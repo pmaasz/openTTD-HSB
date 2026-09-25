@@ -39,14 +39,25 @@ jobs:
   builder-tests:
     name: builder unit tests (ubuntu)
     runs-on: ubuntu-24.04
+    env:
+      CCACHE: ccache
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      HSB_TEST_JOBS: 2
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: true
+      - uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: hsb-ccache-${{ runner.os }}-${{ hashFiles('builder/**', 'patches/**') }}
+          restore-keys: |
+            hsb-ccache-${{ runner.os }}-
       - name: Install deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build libsdl2-dev libpng-dev zlib1g-dev libfreetype6-dev libfluidsynth-dev
+          sudo apt-get install -y cmake ninja-build ccache libsdl2-dev libpng-dev zlib1g-dev libfreetype6-dev libfluidsynth-dev
+          ccache -M 5G
       - name: Build and run builder tests
         run: sh scripts/test-builder.sh
 
