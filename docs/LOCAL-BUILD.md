@@ -43,6 +43,16 @@ cmake -S openttd-upstream -B build/upstream -DCMAKE_BUILD_TYPE=Release \
 cmake --build build/upstream -j2   # ~30-45 min first time, incremental after
 ```
 
+Run the builder Catch2 tests and CTest suite with:
+
+```sh
+sh scripts/test-builder.sh
+```
+
+The runner applies the patch temporarily, builds `openttd_test`, runs
+`ctest --output-on-failure`, and restores the submodule. Override the build
+directory with `HSB_TEST_BUILD_DIR` and parallelism with `HSB_TEST_JOBS`.
+
 Notes: CMake may resolve freetype to the static archive (hence the explicit
 brotli/bz2 libs above). Keep the submodule pristine: verify with
 `git -C openttd-upstream status` before committing. Reverse an applied patch

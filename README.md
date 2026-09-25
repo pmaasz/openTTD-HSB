@@ -24,6 +24,7 @@ patches/
   fetch-upstream.sh         # verify submodule pin
   apply-patches.sh          # apply patches/ to upstream
   gen-patch.sh              # regenerate patches/ from builder/
+  test-builder.sh           # build + run Catch2/CTest builder tests
 /docs/
   FORMATS.md                # manifest + towns/industries/rivers schemas
   SCENARIO.md               # build runbook
