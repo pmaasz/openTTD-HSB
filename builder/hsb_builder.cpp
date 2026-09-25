@@ -18,6 +18,7 @@
 #include "stdafx.h"
 
 #include "hsb_builder.h"
+#include "hsb_builder_math.h"
 
 #include "3rdparty/nlohmann/json.hpp"
 #include "command_func.h"
@@ -61,47 +62,23 @@ extern bool _ignore_industry_restrictions;
 
 namespace {
 
-/** Geographic bounds for lat/lon -> tile mapping (from manifest "bounds"). */
-struct HsbBounds {
-	double lat_min = 0.0;
-	double lat_max = 0.0;
-	double lon_min = 0.0;
-	double lon_max = 0.0;
-};
-
 HsbBounds g_hsb_bounds;
 
 /** Towns use the same spiral fallback radius as LoadTownData; industries are bigger. */
 uint g_hsb_industry_radius = 32;
 bool g_hsb_counter_clockwise = false;
 
-bool IsPowerOfTwo(uint v)
-{
-	return v >= 64 && v <= MAX_MAP_SIZE && (v & (v - 1)) == 0;
-}
-
 std::string BasenameOf(const std::string &path)
 {
 	return std::filesystem::path(path).filename().string();
 }
 
-bool HsbCoordinateValid(double lat, double lon)
-{
-	return std::isfinite(lat) && std::isfinite(lon)
-		&& g_hsb_bounds.lat_min <= lat && lat <= g_hsb_bounds.lat_max
-		&& g_hsb_bounds.lon_min <= lon && lon <= g_hsb_bounds.lon_max;
-}
-
 /** Tile for a lat/lon position (clockwise heightmap mapping, square maps). */
 TileIndex HsbTileFor(double lat, double lon)
 {
-	double x_prop = (g_hsb_bounds.lat_max - lat) / (g_hsb_bounds.lat_max - g_hsb_bounds.lat_min);
-	double y_prop = (lon - g_hsb_bounds.lon_min) / (g_hsb_bounds.lon_max - g_hsb_bounds.lon_min);
-	double tile_x = g_hsb_counter_clockwise ? 1.0 - y_prop : x_prop;
-	double tile_y = g_hsb_counter_clockwise ? x_prop : y_prop;
-	uint32_t tx = static_cast<uint32_t>(std::clamp(std::lround(tile_x * Map::MaxX()), 0L, static_cast<long>(Map::MaxX())));
-	uint32_t ty = static_cast<uint32_t>(std::clamp(std::lround(tile_y * Map::MaxY()), 0L, static_cast<long>(Map::MaxY())));
-	return TileXY(tx, ty);
+	const HsbTile tile = HsbTileForBounds(g_hsb_bounds, lat, lon,
+		Map::MaxX(), Map::MaxY(), g_hsb_counter_clockwise);
+	return TileXY(tile.x, tile.y);
 }
 
 void HsbPaintWater(TileIndex t, bool sea)
@@ -236,7 +213,7 @@ bool HsbCarveWaters(const nlohmann::json &manifest)
 				}
 				double lat0 = wps[i].at(0).get<double>(), lon0 = wps[i].at(1).get<double>();
 				double lat1 = wps[i + 1].at(0).get<double>(), lon1 = wps[i + 1].at(1).get<double>();
-				if (!HsbCoordinateValid(lat0, lon0) || !HsbCoordinateValid(lat1, lon1)) {
+				if (!HsbCoordinateInBounds(g_hsb_bounds, lat0, lon0) || !HsbCoordinateInBounds(g_hsb_bounds, lat1, lon1)) {
 					Debug(misc, 0, "hsb: river waypoint is outside finite bounds");
 					return false;
 				}
@@ -268,14 +245,6 @@ bool HsbCarveWaters(const nlohmann::json &manifest)
 	FixSlopes();
 	MarkWholeScreenDirty();
 	return true;
-}
-
-bool HsbSafeFilename(const std::string &filename)
-{
-	if (filename.empty() || filename == "." || filename == "..") return false;
-	return filename.find('\0') == std::string::npos
-		&& filename.find_first_of("/\\:") == std::string::npos
-		&& std::filesystem::path(filename).filename().string() == filename;
 }
 
 bool HsbValidateTownData(const std::string &path, size_t &town_count)
@@ -422,7 +391,8 @@ bool HsbBuildScenario()
 		Debug(misc, 0, "hsb: cannot read heightmap {}", heightmap);
 		return false;
 	}
-	if (!IsPowerOfTwo(dim_x) || !IsPowerOfTwo(dim_y) || dim_x != dim_y) {
+	if (!HsbIsPowerOfTwo(dim_x, MIN_MAP_SIZE, MAX_MAP_SIZE)
+			|| !HsbIsPowerOfTwo(dim_y, MIN_MAP_SIZE, MAX_MAP_SIZE) || dim_x != dim_y) {
 		Debug(misc, 0, "hsb: heightmap must be square powers of 2 in 64..4096, got {}x{}", dim_x, dim_y);
 		return false;
 	}
@@ -503,7 +473,7 @@ bool HsbBuildScenario()
 			const double lat = entry.at("lat").get<double>();
 			const double lon = entry.at("lon").get<double>();
 			const std::string near = entry.contains("near") ? entry.at("near").get<std::string>() : type;
-			if (type.empty() || !HsbCoordinateValid(lat, lon)) {
+			if (type.empty() || !HsbCoordinateInBounds(g_hsb_bounds, lat, lon)) {
 				Debug(misc, 0, "hsb: invalid industry type or coordinates");
 				return false;
 			}

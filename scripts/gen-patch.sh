@@ -1,6 +1,6 @@
 #!/bin/sh
 # Regenerate patches/01-headless-scenario-builder.diff from builder/ sources.
-# Source of truth: builder/hsb_builder.{h,cpp} + upstream anchors below.
+# Source of truth: builder/hsb_builder.{h,cpp}, math header, tests + upstream anchors below.
 # Usage: sh scripts/gen-patch.sh [--check]
 # Part of openTTD-HSB (GPLv2, see LICENSE.md).
 set -eu
@@ -38,8 +38,9 @@ fi
 clean_upstream()
 {
   git -C "$DIR" reset -q >/dev/null 2>&1 || :
-  git -C "$DIR" checkout -- src/CMakeLists.txt src/genworld.cpp src/openttd.cpp >/dev/null 2>&1 || :
-  rm -f "$DIR/src/hsb_builder.h" "$DIR/src/hsb_builder.cpp" >/dev/null 2>&1 || :
+  git -C "$DIR" checkout -- src/CMakeLists.txt src/genworld.cpp src/openttd.cpp src/tests/CMakeLists.txt >/dev/null 2>&1 || :
+  rm -f "$DIR/src/hsb_builder.h" "$DIR/src/hsb_builder.cpp" "$DIR/src/hsb_builder_math.h" >/dev/null 2>&1 || :
+  rm -f "$DIR/src/tests/hsb_builder.cpp" >/dev/null 2>&1 || :
   remaining=$(git -C "$DIR" status --porcelain --untracked-files=all) || return 1
   if [ -n "$remaining" ]; then
     echo "[gen-patch] cleanup failed; upstream is still dirty" >&2
@@ -66,6 +67,8 @@ trap 'exit 1' 1 2 15
 GENERATED=$(mktemp "$ROOT/patches/.01-headless-scenario-builder.diff.XXXXXX")
 cp "$ROOT/builder/hsb_builder.h" "$DIR/src/hsb_builder.h"
 cp "$ROOT/builder/hsb_builder.cpp" "$DIR/src/hsb_builder.cpp"
+cp "$ROOT/builder/hsb_builder_math.h" "$DIR/src/hsb_builder_math.h"
+cp "$ROOT/builder/hsb_builder_test.cpp" "$DIR/src/tests/hsb_builder.cpp"
 python3 - "$DIR" <<'PY'
 import pathlib
 import sys
@@ -98,13 +101,19 @@ r.write_text(s)
 q = upstream / "src" / "CMakeLists.txt"
 u = q.read_text()
 old_cmake = "    genworld.cpp\n    genworld.h\n    genworld_gui.cpp"
-new_cmake = "    genworld.cpp\n    genworld.h\n    genworld_gui.cpp\n    hsb_builder.cpp\n    hsb_builder.h"
+new_cmake = "    genworld.cpp\n    genworld.h\n    genworld_gui.cpp\n    hsb_builder.cpp\n    hsb_builder.h\n    hsb_builder_math.h"
 assert old_cmake in u, "CMake anchor not found"
 u = u.replace(old_cmake, new_cmake)
 q.write_text(u)
+r = upstream / "src" / "tests" / "CMakeLists.txt"
+t = r.read_text()
+old_tests = "    history_func.cpp\n"
+new_tests = "    history_func.cpp\n    hsb_builder.cpp\n"
+assert old_tests in t, "test CMake anchor not found"
+r.write_text(t.replace(old_tests, new_tests))
 print("[gen-patch] anchors applied")
 PY
-git -C "$DIR" add -N src/hsb_builder.h src/hsb_builder.cpp
+git -C "$DIR" add -N src/hsb_builder.h src/hsb_builder.cpp src/hsb_builder_math.h src/tests/hsb_builder.cpp
 git -C "$DIR" diff --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/ > "$GENERATED"
 clean_upstream
 git -C "$DIR" apply --check "$GENERATED"

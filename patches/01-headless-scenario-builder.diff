@@ -1,13 +1,14 @@
 diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
-index 16215e7..3301b31 100644
+index 16215e7..50e7071 100644
 --- a/src/CMakeLists.txt
 +++ b/src/CMakeLists.txt
-@@ -196,6 +196,8 @@ add_files(
+@@ -196,6 +196,9 @@ add_files(
      genworld.cpp
      genworld.h
      genworld_gui.cpp
 +    hsb_builder.cpp
 +    hsb_builder.h
++    hsb_builder_math.h
      gfx.cpp
      gfx_func.h
      gfx_layout.cpp
@@ -26,10 +27,10 @@ index ce1e212..dea9d94 100644
  		}
 diff --git a/src/hsb_builder.cpp b/src/hsb_builder.cpp
 new file mode 100644
-index 0000000..f56fdd0
+index 0000000..369b1e6
 --- /dev/null
 +++ b/src/hsb_builder.cpp
-@@ -0,0 +1,566 @@
+@@ -0,0 +1,536 @@
 +/**
 + * HSB headless scenario builder.
 + *
@@ -50,6 +51,7 @@ index 0000000..f56fdd0
 +#include "stdafx.h"
 +
 +#include "hsb_builder.h"
++#include "hsb_builder_math.h"
 +
 +#include "3rdparty/nlohmann/json.hpp"
 +#include "command_func.h"
@@ -93,47 +95,23 @@ index 0000000..f56fdd0
 +
 +namespace {
 +
-+/** Geographic bounds for lat/lon -> tile mapping (from manifest "bounds"). */
-+struct HsbBounds {
-+	double lat_min = 0.0;
-+	double lat_max = 0.0;
-+	double lon_min = 0.0;
-+	double lon_max = 0.0;
-+};
-+
 +HsbBounds g_hsb_bounds;
 +
 +/** Towns use the same spiral fallback radius as LoadTownData; industries are bigger. */
 +uint g_hsb_industry_radius = 32;
 +bool g_hsb_counter_clockwise = false;
 +
-+bool IsPowerOfTwo(uint v)
-+{
-+	return v >= 64 && v <= MAX_MAP_SIZE && (v & (v - 1)) == 0;
-+}
-+
 +std::string BasenameOf(const std::string &path)
 +{
 +	return std::filesystem::path(path).filename().string();
 +}
 +
-+bool HsbCoordinateValid(double lat, double lon)
-+{
-+	return std::isfinite(lat) && std::isfinite(lon)
-+		&& g_hsb_bounds.lat_min <= lat && lat <= g_hsb_bounds.lat_max
-+		&& g_hsb_bounds.lon_min <= lon && lon <= g_hsb_bounds.lon_max;
-+}
-+
 +/** Tile for a lat/lon position (clockwise heightmap mapping, square maps). */
 +TileIndex HsbTileFor(double lat, double lon)
 +{
-+	double x_prop = (g_hsb_bounds.lat_max - lat) / (g_hsb_bounds.lat_max - g_hsb_bounds.lat_min);
-+	double y_prop = (lon - g_hsb_bounds.lon_min) / (g_hsb_bounds.lon_max - g_hsb_bounds.lon_min);
-+	double tile_x = g_hsb_counter_clockwise ? 1.0 - y_prop : x_prop;
-+	double tile_y = g_hsb_counter_clockwise ? x_prop : y_prop;
-+	uint32_t tx = static_cast<uint32_t>(std::clamp(std::lround(tile_x * Map::MaxX()), 0L, static_cast<long>(Map::MaxX())));
-+	uint32_t ty = static_cast<uint32_t>(std::clamp(std::lround(tile_y * Map::MaxY()), 0L, static_cast<long>(Map::MaxY())));
-+	return TileXY(tx, ty);
++	const HsbTile tile = HsbTileForBounds(g_hsb_bounds, lat, lon,
++		Map::MaxX(), Map::MaxY(), g_hsb_counter_clockwise);
++	return TileXY(tile.x, tile.y);
 +}
 +
 +void HsbPaintWater(TileIndex t, bool sea)
@@ -268,7 +246,7 @@ index 0000000..f56fdd0
 +				}
 +				double lat0 = wps[i].at(0).get<double>(), lon0 = wps[i].at(1).get<double>();
 +				double lat1 = wps[i + 1].at(0).get<double>(), lon1 = wps[i + 1].at(1).get<double>();
-+				if (!HsbCoordinateValid(lat0, lon0) || !HsbCoordinateValid(lat1, lon1)) {
++				if (!HsbCoordinateInBounds(g_hsb_bounds, lat0, lon0) || !HsbCoordinateInBounds(g_hsb_bounds, lat1, lon1)) {
 +					Debug(misc, 0, "hsb: river waypoint is outside finite bounds");
 +					return false;
 +				}
@@ -300,14 +278,6 @@ index 0000000..f56fdd0
 +	FixSlopes();
 +	MarkWholeScreenDirty();
 +	return true;
-+}
-+
-+bool HsbSafeFilename(const std::string &filename)
-+{
-+	if (filename.empty() || filename == "." || filename == "..") return false;
-+	return filename.find('\0') == std::string::npos
-+		&& filename.find_first_of("/\\:") == std::string::npos
-+		&& std::filesystem::path(filename).filename().string() == filename;
 +}
 +
 +bool HsbValidateTownData(const std::string &path, size_t &town_count)
@@ -454,7 +424,8 @@ index 0000000..f56fdd0
 +		Debug(misc, 0, "hsb: cannot read heightmap {}", heightmap);
 +		return false;
 +	}
-+	if (!IsPowerOfTwo(dim_x) || !IsPowerOfTwo(dim_y) || dim_x != dim_y) {
++	if (!HsbIsPowerOfTwo(dim_x, MIN_MAP_SIZE, MAX_MAP_SIZE)
++			|| !HsbIsPowerOfTwo(dim_y, MIN_MAP_SIZE, MAX_MAP_SIZE) || dim_x != dim_y) {
 +		Debug(misc, 0, "hsb: heightmap must be square powers of 2 in 64..4096, got {}x{}", dim_x, dim_y);
 +		return false;
 +	}
@@ -535,7 +506,7 @@ index 0000000..f56fdd0
 +			const double lat = entry.at("lat").get<double>();
 +			const double lon = entry.at("lon").get<double>();
 +			const std::string near = entry.contains("near") ? entry.at("near").get<std::string>() : type;
-+			if (type.empty() || !HsbCoordinateValid(lat, lon)) {
++			if (type.empty() || !HsbCoordinateInBounds(g_hsb_bounds, lat, lon)) {
 +				Debug(misc, 0, "hsb: invalid industry type or coordinates");
 +				return false;
 +			}
@@ -644,6 +615,66 @@ index 0000000..42e939c
 +bool HsbBuildScenario();
 +
 +#endif /* HSB_BUILDER_H */
+diff --git a/src/hsb_builder_math.h b/src/hsb_builder_math.h
+new file mode 100644
+index 0000000..14e2528
+--- /dev/null
++++ b/src/hsb_builder_math.h
+@@ -0,0 +1,54 @@
++#ifndef HSB_BUILDER_MATH_H
++#define HSB_BUILDER_MATH_H
++
++#include <algorithm>
++#include <cmath>
++#include <cstdint>
++#include <filesystem>
++#include <string>
++
++struct HsbBounds {
++	double lat_min = 0.0;
++	double lat_max = 0.0;
++	double lon_min = 0.0;
++	double lon_max = 0.0;
++};
++
++struct HsbTile {
++	uint32_t x = 0;
++	uint32_t y = 0;
++};
++
++inline bool HsbIsPowerOfTwo(uint32_t value, uint32_t minimum, uint32_t maximum)
++{
++	return value >= minimum && value <= maximum && (value & (value - 1)) == 0;
++}
++
++inline bool HsbCoordinateInBounds(const HsbBounds &bounds, double lat, double lon)
++{
++	return std::isfinite(lat) && std::isfinite(lon)
++		&& bounds.lat_min <= lat && lat <= bounds.lat_max
++		&& bounds.lon_min <= lon && lon <= bounds.lon_max;
++}
++
++inline HsbTile HsbTileForBounds(const HsbBounds &bounds, double lat, double lon,
++	uint32_t max_x, uint32_t max_y, bool counter_clockwise)
++{
++	const double x_prop = (bounds.lat_max - lat) / (bounds.lat_max - bounds.lat_min);
++	const double y_prop = (lon - bounds.lon_min) / (bounds.lon_max - bounds.lon_min);
++	const double tile_x = counter_clockwise ? 1.0 - y_prop : x_prop;
++	const double tile_y = counter_clockwise ? x_prop : y_prop;
++	const long clamped_x = std::clamp(std::lround(tile_x * max_x), 0L, static_cast<long>(max_x));
++	const long clamped_y = std::clamp(std::lround(tile_y * max_y), 0L, static_cast<long>(max_y));
++	return {static_cast<uint32_t>(clamped_x), static_cast<uint32_t>(clamped_y)};
++}
++
++inline bool HsbSafeFilename(const std::string &filename)
++{
++	if (filename.empty() || filename == "." || filename == "..") return false;
++	return filename.find('\0') == std::string::npos
++		&& filename.find_first_of("/\\:") == std::string::npos
++		&& std::filesystem::path(filename).filename().string() == filename;
++}
++
++#endif
 diff --git a/src/openttd.cpp b/src/openttd.cpp
 index 7d585b0..33f1cb3 100644
 --- a/src/openttd.cpp
@@ -670,3 +701,183 @@ index 7d585b0..33f1cb3 100644
  	IncreaseSpriteLRU();
  
  	/* Check for UDP stuff */
+diff --git a/src/tests/CMakeLists.txt b/src/tests/CMakeLists.txt
+index 32715c4..e44e575 100644
+--- a/src/tests/CMakeLists.txt
++++ b/src/tests/CMakeLists.txt
+@@ -4,6 +4,7 @@ add_test_files(
+     enum_over_optimisation.cpp
+     flatset_type.cpp
+     history_func.cpp
++    hsb_builder.cpp
+     landscape_partial_pixel_z.cpp
+     math_func.cpp
+     mock_environment.h
+diff --git a/src/tests/hsb_builder.cpp b/src/tests/hsb_builder.cpp
+new file mode 100644
+index 0000000..cbe7a7f
+--- /dev/null
++++ b/src/tests/hsb_builder.cpp
+@@ -0,0 +1,162 @@
++#include "../stdafx.h"
++
++#include "../3rdparty/catch2/catch.hpp"
++
++#include "../hsb_builder.h"
++#include "../hsb_builder_math.h"
++#include "../3rdparty/nlohmann/json.hpp"
++
++#include <chrono>
++#include <cstdlib>
++#include <filesystem>
++#include <fstream>
++#include <limits>
++#include <string>
++
++namespace {
++
++void SetManifestEnvironment(const char *value);
++
++class TestDirectory {
++public:
++	TestDirectory()
++	{
++		const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
++		path = std::filesystem::temp_directory_path() /
++			("hsb-builder-test-" + std::to_string(stamp));
++		std::filesystem::create_directories(path);
++	}
++
++	~TestDirectory()
++	{
++		std::error_code error;
++		std::filesystem::remove_all(path, error);
++	}
++
++	std::filesystem::path path;
++};
++
++class EnvironmentGuard {
++public:
++	~EnvironmentGuard()
++	{
++		SetManifestEnvironment(nullptr);
++	}
++};
++
++void SetManifestEnvironment(const char *value)
++{
++#ifdef _WIN32
++	_putenv_s("HSB_BUILD", value == nullptr ? "" : value);
++#else
++	if (value == nullptr) {
++		unsetenv("HSB_BUILD");
++	} else {
++		setenv("HSB_BUILD", value, 1);
++	}
++#endif
++}
++
++nlohmann::json ValidManifest(const std::filesystem::path &directory)
++{
++	return {
++		{"heightmap", (directory / "map.png").string()},
++		{"towns", (directory / "towns.json").string()},
++		{"industries", (directory / "industries.json").string()},
++		{"bounds", {
++			{"lat_min", 10.0},
++			{"lat_max", 20.0},
++			{"lon_min", 30.0},
++			{"lon_max", 40.0},
++		}},
++		{"start_year", 2025},
++		{"save", "output.scn"},
++	};
++}
++
++void WriteManifest(const std::filesystem::path &directory, const nlohmann::json &manifest)
++{
++	std::ofstream output(directory / "manifest.json");
++	output << manifest.dump();
++}
++
++bool RunManifest(const std::filesystem::path &directory, const nlohmann::json &manifest)
++{
++	WriteManifest(directory, manifest);
++	const auto manifest_path = (directory / "manifest.json").string();
++	SetManifestEnvironment(manifest_path.c_str());
++	return HsbBuildScenario();
++}
++
++}
++
++TEST_CASE("HSB geometry uses the last-pixel convention")
++{
++	const HsbBounds bounds{10.0, 20.0, 30.0, 40.0};
++
++	const HsbTile center = HsbTileForBounds(bounds, 15.0, 35.0, 100, 100, false);
++	CHECK(center.x == 50);
++	CHECK(center.y == 50);
++
++	const HsbTile clockwise = HsbTileForBounds(bounds, 17.0, 36.0, 100, 100, false);
++	CHECK(clockwise.x == 30);
++	CHECK(clockwise.y == 60);
++
++	const HsbTile counter_clockwise = HsbTileForBounds(bounds, 17.0, 36.0, 100, 100, true);
++	CHECK(counter_clockwise.x == 40);
++	CHECK(counter_clockwise.y == 30);
++
++	const HsbTile north_west = HsbTileForBounds(bounds, 20.0, 30.0, 100, 100, false);
++	CHECK(north_west.x == 0);
++	CHECK(north_west.y == 0);
++}
++
++TEST_CASE("HSB geometry and filename guards reject invalid values")
++{
++	const HsbBounds bounds{10.0, 20.0, 30.0, 40.0};
++	CHECK(HsbCoordinateInBounds(bounds, 15.0, 35.0));
++	CHECK_FALSE(HsbCoordinateInBounds(bounds, 21.0, 35.0));
++	CHECK_FALSE(HsbCoordinateInBounds(bounds, 15.0, std::numeric_limits<double>::quiet_NaN()));
++	CHECK(HsbIsPowerOfTwo(64, 64, 4096));
++	CHECK(HsbIsPowerOfTwo(4096, 64, 4096));
++	CHECK_FALSE(HsbIsPowerOfTwo(8192, 64, 4096));
++	CHECK_FALSE(HsbIsPowerOfTwo(65, 64, 4096));
++	CHECK(HsbSafeFilename("output.scn"));
++	CHECK_FALSE(HsbSafeFilename("../output.scn"));
++	CHECK_FALSE(HsbSafeFilename("sub/output.scn"));
++	CHECK_FALSE(HsbSafeFilename("."));
++	CHECK_FALSE(HsbSafeFilename(std::string("output\0.scn", 11)));
++}
++
++TEST_CASE("HSB rejects malformed manifests before map generation")
++{
++	TestDirectory directory;
++	EnvironmentGuard environment;
++	nlohmann::json manifest = ValidManifest(directory.path);
++
++	CHECK_FALSE(RunManifest(directory.path, {{}}));
++	CHECK_FALSE(RunManifest(directory.path, {{"bounds", manifest.at("bounds")}}));
++	manifest.at("bounds")["lat_max"] = 5.0;
++	CHECK_FALSE(RunManifest(directory.path, manifest));
++	manifest = ValidManifest(directory.path);
++	manifest["save"] = "../escape.scn";
++	CHECK_FALSE(RunManifest(directory.path, manifest));
++	manifest = ValidManifest(directory.path);
++	manifest["seed"] = 0xFFFFFFFF;
++	CHECK_FALSE(RunManifest(directory.path, manifest));
++	manifest = ValidManifest(directory.path);
++	manifest["heightmap"] = "map.png";
++	CHECK_FALSE(RunManifest(directory.path, manifest));
++}
++
++TEST_CASE("HSB rejects invalid town data before map generation")
++{
++	TestDirectory directory;
++	EnvironmentGuard environment;
++	nlohmann::json manifest = ValidManifest(directory.path);
++	std::ofstream towns(directory.path / "towns.json");
++	towns << R"([])";
++	towns.close();
++
++	CHECK_FALSE(RunManifest(directory.path, manifest));
++}
