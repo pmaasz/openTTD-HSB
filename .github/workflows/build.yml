@@ -59,6 +59,7 @@ jobs:
         if: runner.os == 'Windows'
         run:           choco install cmake ninja -y
       - name: Apply HSB patch
+        shell: bash
         run: sh scripts/apply-patches.sh
       - name: Configure
         run: cmake -S openttd-upstream -B build/upstream -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DOPTION_DEDICATED=OFF

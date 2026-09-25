@@ -57,7 +57,7 @@ def _power_of_two(value: int) -> int:
 
 
 HeightmapSize = Annotated[int, Field(ge=64, le=4096), AfterValidator(_power_of_two)]
-StartYear = Annotated[int, Field(ge=1920, le=4095)]
+StartYear = Annotated[int, Field(ge=0, le=5_000_000)]
 Seed = Annotated[int, Field(ge=0, le=4_294_967_294)]
 IndustrySearchRadius = Annotated[int, Field(ge=1, le=512)]
 Rotation = Literal["clockwise", "counter-clockwise"]
