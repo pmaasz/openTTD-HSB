@@ -136,6 +136,11 @@ bool HsbParseBounds(const nlohmann::json &manifest)
 	}
 	const auto &b = manifest.at("bounds");
 	try {
+		if (!b.at("lat_min").is_number() || !b.at("lat_max").is_number()
+				|| !b.at("lon_min").is_number() || !b.at("lon_max").is_number()) {
+			Debug(misc, 0, "hsb: bounds values must be numbers");
+			return false;
+		}
 		g_hsb_bounds.lat_min = b.at("lat_min").get<double>();
 		g_hsb_bounds.lat_max = b.at("lat_max").get<double>();
 		g_hsb_bounds.lon_min = b.at("lon_min").get<double>();
@@ -175,6 +180,10 @@ bool HsbCarveWaters(const nlohmann::json &manifest)
 		return false;
 	}
 	if (rivers_path.empty()) return true;
+	if (!std::filesystem::path(rivers_path).is_absolute()) {
+		Debug(misc, 0, "hsb: rivers path must be absolute");
+		return false;
+	}
 	std::ifstream river_file(rivers_path);
 	if (!river_file) {
 		Debug(misc, 0, "hsb: cannot open {}", rivers_path);
@@ -219,8 +228,10 @@ bool HsbCarveWaters(const nlohmann::json &manifest)
 				return false;
 			}
 			for (size_t i = 0; i + 1 < wps.size(); ++i) {
-				if (!wps[i].is_array() || wps[i].size() != 2 || !wps[i + 1].is_array() || wps[i + 1].size() != 2) {
-					Debug(misc, 0, "hsb: river waypoints must be [lat, lon] pairs");
+				if (!wps[i].is_array() || wps[i].size() != 2 || !wps[i + 1].is_array() || wps[i + 1].size() != 2
+						|| !wps[i].at(0).is_number() || !wps[i].at(1).is_number()
+						|| !wps[i + 1].at(0).is_number() || !wps[i + 1].at(1).is_number()) {
+					Debug(misc, 0, "hsb: river waypoints must be numeric [lat, lon] pairs");
 					return false;
 				}
 				double lat0 = wps[i].at(0).get<double>(), lon0 = wps[i].at(1).get<double>();
@@ -295,7 +306,7 @@ bool HsbValidateTownData(const std::string &path, size_t &town_count)
 			const uint64_t population = town.at("population").get<uint64_t>();
 			const double x = town.at("x").get<double>();
 			const double y = town.at("y").get<double>();
-			if (name.empty() || !names.insert(name).second || population == 0 || population > std::numeric_limits<uint>::max()
+			if (name.empty() || name.size() >= 32 || !names.insert(name).second || population == 0 || population > std::numeric_limits<uint>::max()
 					|| !std::isfinite(x) || !std::isfinite(y) || x <= 0.0 || x >= 1.0 || y <= 0.0 || y >= 1.0) {
 				Debug(misc, 0, "hsb: invalid town entry '{}'", name);
 				return false;
@@ -348,11 +359,25 @@ bool HsbBuildScenario()
 	int64_t industry_search_radius;
 	uint32_t generation_seed;
 	try {
+		if (!manifest.at("heightmap").is_string() || !manifest.at("towns").is_string()
+				|| !manifest.at("industries").is_string() || !manifest.at("start_year").is_number_integer()
+				|| !manifest.at("save").is_string()) {
+			Debug(misc, 0, "hsb: manifest fields have invalid types");
+			return false;
+		}
 		heightmap = manifest.at("heightmap").get<std::string>();
 		towns = manifest.at("towns").get<std::string>();
 		industries_path = manifest.at("industries").get<std::string>();
 		start_year = manifest.at("start_year").get<int>();
 		save = manifest.at("save").get<std::string>();
+		if (manifest.contains("heightmap_height") && !manifest.at("heightmap_height").is_null()
+				&& !manifest.at("heightmap_height").is_number_integer()) return false;
+		if (manifest.contains("seed") && !manifest.at("seed").is_null()
+				&& !manifest.at("seed").is_number_unsigned()) return false;
+		if (manifest.contains("industry_search_radius") && !manifest.at("industry_search_radius").is_null()
+				&& !manifest.at("industry_search_radius").is_number_integer()) return false;
+		if (manifest.contains("heightmap_rotation") && !manifest.at("heightmap_rotation").is_null()
+				&& !manifest.at("heightmap_rotation").is_string()) return false;
 		heightmap_height = !manifest.contains("heightmap_height") || manifest.at("heightmap_height").is_null() ? 12 : manifest.at("heightmap_height").get<int>();
 		generation_seed = !manifest.contains("seed") || manifest.at("seed").is_null() ? 20250924 : manifest.at("seed").get<uint32_t>();
 		industry_search_radius = !manifest.contains("industry_search_radius") || manifest.at("industry_search_radius").is_null() ? 32 : manifest.at("industry_search_radius").get<int64_t>();
@@ -371,7 +396,7 @@ bool HsbBuildScenario()
 		return false;
 	}
 	if (start_year < 0 || start_year > 5'000'000 || heightmap_height < 1 || heightmap_height > static_cast<int>(MAX_TILE_HEIGHT)
-			|| industry_search_radius < 1 || industry_search_radius > 512) {
+			|| industry_search_radius < 1 || industry_search_radius > 512 || generation_seed == UINT32_MAX) {
 		Debug(misc, 0, "hsb: manifest year, height, or industry radius is out of range");
 		return false;
 	}

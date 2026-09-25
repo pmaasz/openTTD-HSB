@@ -16,7 +16,7 @@
  *   "heightmap_height": 12,                  // optional, default 12
  *   "heightmap_rotation": "clockwise",       // optional: clockwise (default)
  *                                            // or counter-clockwise
- *   "seed": 20250924,                        // optional, fixed generation seed
+ *   "seed": 20250924,                        // optional, fixed generation seed (not 0xffffffff)
  *   "industry_search_radius": 32,            // optional 1..512 spiral fallback tiles
  *   "save":       "output.scn"
  * }
