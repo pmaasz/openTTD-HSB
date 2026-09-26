@@ -2,16 +2,53 @@ name: build
 
 on:
   push:
+    branches: [main]
   pull_request:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Pull request number to verify manually
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || inputs.pr_number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
+  validate-dispatch:
+    name: validate manual PR number
+    if: github.event_name == 'workflow_dispatch' && inputs.pr_number != ''
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check PR number
+        env:
+          PR_NUMBER: ${{ inputs.pr_number }}
+        run: |
+          case "$PR_NUMBER" in
+            ''|0|*[!0-9]*)
+              echo "pr_number must be a positive integer" >&2
+              exit 2
+              ;;
+          esac
+
   scripts:
     name: pin + patch check + scripts (ubuntu)
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.user.login == 'pmaasz' ||
+      inputs.pr_number != ''
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: false
+          persist-credentials: false
+          ref: ${{ inputs.pr_number && format('refs/pull/{0}/merge', inputs.pr_number) || github.ref }}
       - name: Initialize fresh upstream submodule
         run: git submodule update --init --depth 1
       - uses: actions/setup-python@v5
@@ -38,6 +75,10 @@ jobs:
 
   builder-tests:
     name: builder unit tests (ubuntu)
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.user.login == 'pmaasz' ||
+      inputs.pr_number != ''
     runs-on: ubuntu-24.04
     env:
       CCACHE: ccache
@@ -47,6 +88,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: true
+          persist-credentials: false
+          ref: ${{ inputs.pr_number && format('refs/pull/{0}/merge', inputs.pr_number) || github.ref }}
       - uses: actions/cache@v4
         with:
           path: ${{ github.workspace }}/.ccache
@@ -63,6 +106,10 @@ jobs:
 
   upstream:
     name: upstream ${{ matrix.os }}
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.user.login == 'pmaasz' ||
+      inputs.pr_number != ''
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -72,6 +119,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: true
+          persist-credentials: false
+          ref: ${{ inputs.pr_number && format('refs/pull/{0}/merge', inputs.pr_number) || github.ref }}
       - name: Install deps (linux)
         if: runner.os == 'Linux'
         run: |

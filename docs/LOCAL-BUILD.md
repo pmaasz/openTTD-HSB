@@ -89,3 +89,11 @@ in /tmp reads /tmp/scenario/...); keep the submodule pristine by reversing
 applied patches, including their newly created files; FixSlopes() must run
 after any direct terrain edits or town road-building asserts; newgame settings
 (not game settings) survive GenerateWorld's reset.
+
+## CI policy
+
+Pushes to `main` run automatically. Pull requests from other contributors
+create no billable jobs. To verify a contributor PR manually, use **Actions →
+build → Run workflow**, enter its PR number in `pr_number`, and run it; the
+workflow checks out `refs/pull/<number>/merge`. The workflow uses a read-only
+repository token and does not persist checkout credentials.
