@@ -12,6 +12,8 @@
 #include <fstream>
 #include <limits>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace {
 
@@ -128,6 +130,48 @@ TEST_CASE("HSB geometry and filename guards reject invalid values")
 	CHECK_FALSE(HsbSafeFilename(std::string("output\0.scn", 11)));
 }
 
+TEST_CASE("HSB staircase walk keeps every carved tile edge-connected")
+{
+	/* A river rasterised as a straight line between two waypoints produces tiles
+	 * that only touch at their corners wherever it runs diagonally: a chain of
+	 * ponds a ship cannot enter. The walk must visit every tile of the shortest
+	 * path and consecutive visits must share an edge. */
+	auto collect = [](int x0, int y0, int x1, int y1) {
+		std::vector<std::pair<int, int>> path;
+		HsbStaircaseWalk(x0, y0, x1, y1, [&](int x, int y, bool) { path.emplace_back(x, y); });
+		return path;
+	};
+
+	SECTION("horizontal runs") {
+		CHECK(collect(0, 0, 3, 0) == std::vector<std::pair<int, int>>{{0, 0}, {1, 0}, {2, 0}, {3, 0}});
+		CHECK(collect(3, 0, 0, 0) == std::vector<std::pair<int, int>>{{3, 0}, {2, 0}, {1, 0}, {0, 0}});
+	}
+	SECTION("vertical runs") {
+		CHECK(collect(0, 0, 0, 2) == std::vector<std::pair<int, int>>{{0, 0}, {0, 1}, {0, 2}});
+	}
+	SECTION("a diagonal is a staircase, not a cross") {
+		const std::vector<std::pair<int, int>> path = collect(0, 0, 3, 3);
+		REQUIRE(path.size() == 7);
+		for (size_t i = 1; i < path.size(); ++i) {
+			const int dx = std::abs(path[i].first - path[i - 1].first);
+			const int dy = std::abs(path[i].second - path[i - 1].second);
+			CHECK(dx + dy == 1);
+		}
+		CHECK(path.back() == std::make_pair(3, 3));
+	}
+	SECTION("a zero-length move still visits its single tile") {
+		CHECK(collect(5, 5, 5, 5) == std::vector<std::pair<int, int>>{{5, 5}});
+	}
+	SECTION("the path is monotone and covers the bounding box") {
+		const std::vector<std::pair<int, int>> path = collect(0, 0, 2, 5);
+		REQUIRE(path.size() == 8);
+		for (size_t i = 1; i < path.size(); ++i) {
+			CHECK(path[i].first >= path[i - 1].first);
+			CHECK(path[i].second >= path[i - 1].second);
+		}
+	}
+}
+
 TEST_CASE("HSB rejects malformed manifests before map generation")
 {
 	TestDirectory directory;
@@ -146,6 +190,31 @@ TEST_CASE("HSB rejects malformed manifests before map generation")
 	CHECK_FALSE(RunManifest(directory.path, manifest));
 	manifest = ValidManifest(directory.path);
 	manifest["heightmap"] = "map.png";
+	CHECK_FALSE(RunManifest(directory.path, manifest));
+}
+
+TEST_CASE("HSB rejects out-of-range scenario settings before map generation")
+{
+	TestDirectory directory;
+	EnvironmentGuard environment;
+
+	/* Company slots, loan, snow line, and currency are pinned so they are not
+	 * inherited from the builder's own openttd.cfg - but an out-of-range or
+	 * unknown value must be a build error, not a silent fallback. */
+	nlohmann::json manifest = ValidManifest(directory.path);
+	manifest["currency"] = "XYZ";
+	CHECK_FALSE(RunManifest(directory.path, manifest));
+	manifest = ValidManifest(directory.path);
+	manifest["competitors"] = 99;
+	CHECK_FALSE(RunManifest(directory.path, manifest));
+	manifest = ValidManifest(directory.path);
+	manifest["max_loan"] = -1;
+	CHECK_FALSE(RunManifest(directory.path, manifest));
+	manifest = ValidManifest(directory.path);
+	manifest["snow_line_height"] = 9999;
+	CHECK_FALSE(RunManifest(directory.path, manifest));
+	manifest = ValidManifest(directory.path);
+	manifest["industry_search_radius"] = 0;
 	CHECK_FALSE(RunManifest(directory.path, manifest));
 }
 

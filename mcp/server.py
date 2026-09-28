@@ -273,13 +273,17 @@ def _stage_sources(sources: list[tuple[str, Path]],
 
 def do_build_heightmap(bounds: Bounds, zoom: Zoom = 8,
                        size: HeightmapSize = 2048,
+                       sea_level: float = 0.0,
                        out: PathArg = "heightmap.png",
                        master_out: PathArg = "heightmap-master.tif",
                        timeout: Timeout = 1200) -> dict[str, Any]:
+    if not math.isfinite(sea_level):
+        return {"ok": False, "error": "sea_level must be finite"}
     out_path = _confined_path(out, "heightmap output")
     master_path = _confined_path(master_out, "heightmap master output")
     res = _run("build-heightmap.py", [
         *bounds.argv(), "--zoom", str(zoom), "--size", str(size),
+        "--sea-level", str(sea_level),
         "--out", str(out_path), "--master-out", str(master_path),
     ], timeout)
     if res["ok"]:
@@ -428,8 +432,12 @@ def do_write_manifest(heightmap: PathArg, towns: PathArg,
                       save: str = "output.scn",
                       rivers: Optional[PathArg] = None,
                       height: Annotated[int, Field(ge=1, le=255)] = 12,
+                      snow_line: Annotated[int, Field(ge=0, le=255)] = 0,
                       rotation: Rotation = "clockwise", seed: Seed = 20250924,
                       industry_search_radius: IndustrySearchRadius = 32,
+                      max_loan: Annotated[int, Field(ge=0, le=4_000_000_000)] = 0,
+                      competitors: Annotated[int, Field(ge=0, le=15)] = 0,
+                      currency: str = "",
                       out: PathArg = "build-manifest.json",
                       timeout: Timeout = 120) -> dict[str, Any]:
     heightmap_path = _confined_path(heightmap, "heightmap path")
@@ -440,9 +448,13 @@ def do_write_manifest(heightmap: PathArg, towns: PathArg,
     argv = ["--heightmap", str(heightmap_path), "--towns", str(towns_path),
             "--industries", str(industries_path), *bounds.argv(),
             "--start-year", str(start_year), "--height", str(height),
+            "--snow-line", str(snow_line),
             "--rotation", rotation, "--save", save_name, "--seed", str(seed),
             "--industry-search-radius", str(industry_search_radius),
+            "--max-loan", str(max_loan), "--competitors", str(competitors),
             "--out", str(out_path)]
+    if currency:
+        argv += ["--currency", currency]
     if rivers:
         rivers_path = _confined_path(rivers, "rivers path")
         argv += ["--rivers", str(rivers_path)]
@@ -544,7 +556,70 @@ def do_run_builder(manifest: PathArg, config: PathArg,
     saved = "hsb: saved" in output
     return {"ok": proc.returncode == 0 and saved,
             "returncode": proc.returncode, "saved": saved,
+            "audit": _parse_audit(output),
             "staged": [str(path) for path in staged], "output": output}
+
+
+def _parse_audit(output: str) -> dict[str, Any]:
+    """Pull the builder's `hsb: audit: k=v ...` line out of the engine log.
+
+    The builder measures what it produced (towns on water, how much carved
+    river a ship can reach). Returning the numbers as a dict means an agent can
+    assert on them instead of reading a log line: towns_on_water must be 0, and
+    carved_reachable should equal carved.
+    """
+    for line in output.splitlines():
+        _, marker, payload = line.partition("hsb: audit: ")
+        if not marker:
+            continue
+        audit: dict[str, Any] = {}
+        for field in payload.split():
+            key, separator, value = field.partition("=")
+            if not separator:
+                continue
+            try:
+                audit[key] = int(value)
+            except ValueError:
+                try:
+                    audit[key] = float(value)
+                except ValueError:
+                    audit[key] = value
+        if audit:
+            return audit
+    return {}
+
+
+def do_render_preview(heightmap: PathArg, towns: PathArg, industries: PathArg,
+                      bounds: Bounds, out: PathArg = "preview.png",
+                      rivers: Optional[PathArg] = None,
+                      size: HeightmapSize = 1024, palette: bool = False,
+                      allow_town_on_water: bool = False,
+                      timeout: Timeout = 300) -> dict[str, Any]:
+    """Render terrain + rivers + towns + industries, and fail on towns in water."""
+    out_path = _confined_path(out, "preview output")
+    argv = ["--heightmap", str(_confined_path(heightmap, "heightmap path")),
+            "--towns", str(_confined_path(towns, "towns path")),
+            "--industries", str(_confined_path(industries, "industries path")),
+            *bounds.argv(), "--size", str(size), "--out", str(out_path)]
+    if rivers:
+        argv += ["--rivers", str(_confined_path(rivers, "rivers path"))]
+    if palette:
+        argv.append("--palette")
+    if allow_town_on_water:
+        argv.append("--allow-town-on-water")
+    res = _run("render-preview.py", argv, timeout)
+    # The script logs "[render-preview] ON WATER (N): name, name".
+    on_water: list[str] = []
+    for line in res.get("output", "").splitlines():
+        _, marker, payload = line.partition("ON WATER (")
+        if not marker or "):" not in payload:
+            continue
+        on_water.extend(name.strip() for name in
+                        payload.split("):", 1)[1].split(",") if name.strip())
+    res["towns_on_water"] = on_water
+    if res["ok"]:
+        res["preview"] = str(out_path)
+    return res
 
 
 mcp = MCPServer(
@@ -554,21 +629,29 @@ mcp = MCPServer(
     instructions=(
         "Workflow: 1) write_cities_csv (+ optional geocode_towns), "
         "2) build_heightmap with the SAME bounds, 3) build_towns, "
-        "4) write_industries (+ write_rivers), 5) validate, "
-        "6) write_manifest, 7) run_builder. "
-        "Bounds must agree across every step. Read hsb://formats and "
-        "hsb://workflow first."),
+        "4) write_industries (+ write_rivers), 5) render_preview, "
+        "6) validate, 7) write_manifest, 8) run_builder. "
+        "Bounds must agree across every step. render_preview fails when a town "
+        "anchor lands on water, which is cheaper to fix than a rebuild. "
+        "run_builder returns an `audit` dict; require towns_on_water == 0 and "
+        "carved_reachable == carved. Read hsb://formats and hsb://workflow first."),
 )
 
 
 @mcp.tool()
 def build_heightmap(bounds: Bounds, zoom: Zoom = 8,
                     size: HeightmapSize = 2048,
+                    sea_level: float = 0.0,
                     out: PathArg = "heightmap.png",
                     master_out: PathArg = "heightmap-master.tif",
                     timeout: Timeout = 1200) -> dict[str, Any]:
-    """Build heightmap PNG from elevation tiles for the given bounds."""
-    return do_build_heightmap(bounds, zoom, size, out, master_out, timeout)
+    """Build heightmap PNG from elevation tiles for the given bounds.
+
+    sea_level is the elevation in metres below which a pixel counts as water;
+    pass a small negative value (e.g. -2) to drop SRTM tidal flats and
+    reclaimed land that would otherwise render as unbuildable ground.
+    """
+    return do_build_heightmap(bounds, zoom, size, sea_level, out, master_out, timeout)
 
 
 @mcp.tool()
@@ -629,18 +712,43 @@ def validate(heightmap: PathArg, towns: PathArg, industries: PathArg,
 
 
 @mcp.tool()
+def render_preview(heightmap: PathArg, towns: PathArg, industries: PathArg,
+                   bounds: Bounds, out: PathArg = "preview.png",
+                   rivers: Optional[PathArg] = None,
+                   size: HeightmapSize = 1024, palette: bool = False,
+                   allow_town_on_water: bool = False,
+                   timeout: Timeout = 300) -> dict[str, Any]:
+    """Render terrain + rivers + towns + industries as a PNG, and FAIL when a
+    town anchor lands on water. Cheaper than a full rebuild; run it before
+    write_manifest. Set allow_town_on_water to report collisions without failing.
+    """
+    return do_render_preview(heightmap, towns, industries, bounds, out, rivers,
+                             size, palette, allow_town_on_water, timeout)
+
+
+@mcp.tool()
 def write_manifest(heightmap: PathArg, towns: PathArg, industries: PathArg,
                    bounds: Bounds, start_year: StartYear = 2025,
                    save: str = "output.scn", rivers: Optional[PathArg] = None,
                    height: Annotated[int, Field(ge=1, le=255)] = 12,
+                   snow_line: Annotated[int, Field(ge=0, le=255)] = 0,
                    rotation: Rotation = "clockwise", seed: Seed = 20250924,
                    industry_search_radius: IndustrySearchRadius = 32,
+                   max_loan: Annotated[int, Field(ge=0, le=4_000_000_000)] = 0,
+                   competitors: Annotated[int, Field(ge=0, le=15)] = 0,
+                   currency: str = "",
                    out: PathArg = "build-manifest.json",
                    timeout: Timeout = 120) -> dict[str, Any]:
-    """Write the HSB_BUILD manifest embedding bounds + absolute paths."""
+    """Write the HSB_BUILD manifest embedding bounds + absolute paths.
+
+    competitors defaults to 0: a scenario with no company slots drops the player
+    onto the map as a spectator. currency (e.g. "EUR") is pinned in the manifest
+    rather than inherited from the -c config, which is machine state.
+    """
     return do_write_manifest(heightmap, towns, industries, bounds, start_year,
-                             save, rivers, height, rotation, seed,
-                             industry_search_radius, out, timeout)
+                             save, rivers, height, snow_line, rotation, seed,
+                             industry_search_radius, max_loan, competitors,
+                             currency, out, timeout)
 
 
 @mcp.tool()

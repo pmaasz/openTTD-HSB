@@ -16,13 +16,28 @@
  *   "heightmap_height": 12,                  // optional, default 12
  *   "heightmap_rotation": "clockwise",       // optional: clockwise (default)
  *                                            // or counter-clockwise
+ *   "snow_line_height": 10,                  // optional 0..255, 0 = derive from snow_coverage
  *   "seed": 20250924,                        // optional, fixed generation seed (not 0xffffffff)
  *   "industry_search_radius": 32,            // optional 1..512 spiral fallback tiles
+ *   "max_loan": 1500000,                     // optional >= 0, 0 = engine default
+ *   "competitors": 0,                        // optional 0..15 company slots
+ *   "currency": "EUR",                       // optional ISO code from the engine table; unknown = error
  *   "save":       "output.scn"
  * }
  * heightmap/towns are resolved by basename through the engine file search
  * (scenario/heightmap in the personal dir); industries/rivers manifests are
  * read directly; save goes to the scenario dir.
+ *
+ * Settings that are not pinned in the manifest are inherited from the -c config
+ * file, which is machine state rather than intent. Everything that would be
+ * silently wrong in every player's save if the config happened to differ
+ * (start year, snow line, loan, company slots, currency, selective servicing)
+ * is therefore either pinned by default or rejected when out of range.
+ *
+ * On success the build logs one machine-readable audit line, e.g.
+ *   hsb: audit: towns=124 towns_on_water=0 industries=73 water=2810000
+ *        sea_fraction=0.168 water_bodies=41 isolated_water_tiles=2
+ *        water_unreachable=310 carved=18800 carved_reachable=18800
  *
  * Run: HSB_BUILD=manifest.json openttd -e -c <config>
  * (config must activate the wanted NewGRFs first).

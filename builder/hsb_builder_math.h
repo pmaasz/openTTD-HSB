@@ -43,6 +43,38 @@ inline HsbTile HsbTileForBounds(const HsbBounds &bounds, double lat, double lon,
 	return {static_cast<uint32_t>(clamped_x), static_cast<uint32_t>(clamped_y)};
 }
 
+/**
+ * Visit every tile of the shortest 4-connected staircase from (x0, y0) to (x1, y1).
+ *
+ * Ships follow water edges, so a river rasterised as a straight line between two
+ * waypoints yields tiles that only touch at their corners wherever it runs
+ * diagonally: a chain of ponds that looks connected on the map and is not.
+ * The staircase moves one tile at a time along the four cardinal directions and
+ * visits both ends of every step, so consecutive visits share an edge.
+ *
+ * Horizontal moves come first, then vertical. The callback is invoked with
+ * (x, y, horizontal) and is expected to be called for every tile on the path,
+ * the start included and the end included. The path is empty when the start
+ * already is the end.
+ */
+template <typename Tstep>
+inline void HsbStaircaseWalk(int x0, int y0, int x1, int y1, Tstep step)
+{
+	const int dx = (x1 > x0) - (x1 < x0);
+	const int dy = (y1 > y0) - (y1 < y0);
+	int x = x0;
+	int y = y0;
+	step(x, y, true);
+	while (x != x1) {
+		x += dx;
+		step(x, y, true);
+	}
+	while (y != y1) {
+		y += dy;
+		step(x, y, false);
+	}
+}
+
 inline bool HsbSafeFilename(const std::string &filename)
 {
 	if (filename.empty() || filename == "." || filename == "..") return false;

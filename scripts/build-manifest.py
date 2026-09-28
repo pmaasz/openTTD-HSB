@@ -17,6 +17,7 @@ import argparse
 import json
 import math
 import os
+import re
 import stat
 import sys
 import tempfile
@@ -24,6 +25,11 @@ import tempfile
 from PIL import Image
 
 errors = []
+
+#: The engine's currency table only has three-letter uppercase codes
+#: (src/currency.h). The builder rejects an unknown one rather than falling
+#: back silently, so catch the obvious typos before the build does.
+CURRENCY_RE = re.compile(r"[A-Z]{3}")
 
 
 def fail(msg):
@@ -122,6 +128,8 @@ def main(argv=None):
     p.add_argument("--lon-max", type=float, required=True)
     p.add_argument("--start-year", type=int, default=2025)
     p.add_argument("--height", type=int, default=12, help="heightmap_height levels")
+    p.add_argument("--snow-line", type=int, default=0,
+                   help="snow_line_height levels; 0 derives it from snow coverage")
     p.add_argument("--rotation", default="clockwise",
                    choices=["clockwise", "counter-clockwise"],
                    help="heightmap rotation (must match manual editor flow)")
@@ -130,6 +138,14 @@ def main(argv=None):
                    help="fixed generation seed for bit-identical rebuilds")
     p.add_argument("--industry-search-radius", type=int, default=32,
                    help="spiral fallback radius (tiles) for industry placement")
+    p.add_argument("--max-loan", type=int, default=0,
+                   help="difficulty.max_loan; 0 keeps the engine default")
+    p.add_argument("--competitors", type=int, default=0,
+                   help="company slots (0 = no AI; a scenario with none drops "
+                        "the player onto the map as a spectator)")
+    p.add_argument("--currency", default="",
+                   help="ISO currency code from the engine table, e.g. EUR; "
+                        "empty keeps whatever the -c config says")
     p.add_argument("--out", default="build-manifest.json")
     args = p.parse_args(argv)
 
@@ -138,10 +154,18 @@ def main(argv=None):
         fail("--start-year must be in 0..5000000")
     if not 1 <= args.height <= 255:
         fail("--height must be in 1..255")
+    if not 0 <= args.snow_line <= 255:
+        fail("--snow-line must be in 0..255")
     if not 0 <= args.seed < 0xFFFFFFFF:
         fail("--seed must be in 0..4294967294")
     if not 1 <= args.industry_search_radius <= 512:
         fail("--industry-search-radius must be in 1..512")
+    if not 0 <= args.max_loan <= 4_000_000_000:
+        fail("--max-loan must be in 0..4000000000")
+    if not 0 <= args.competitors <= 15:
+        fail("--competitors must be in 0..15")
+    if args.currency and not CURRENCY_RE.fullmatch(args.currency):
+        fail(f"--currency must be a 3-letter uppercase code, got {args.currency!r}")
     validate_save_name(args.save)
 
     input_paths = {
@@ -175,8 +199,15 @@ def main(argv=None):
         "heightmap_rotation": args.rotation,
         "seed": args.seed,
         "industry_search_radius": args.industry_search_radius,
+        "competitors": args.competitors,
         "save": args.save,
     }
+    if args.snow_line > 0:
+        manifest["snow_line_height"] = args.snow_line
+    if args.max_loan > 0:
+        manifest["max_loan"] = args.max_loan
+    if args.currency:
+        manifest["currency"] = args.currency
     if args.rivers:
         manifest["rivers"] = input_paths["rivers"]
 

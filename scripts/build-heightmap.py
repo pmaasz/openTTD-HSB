@@ -128,10 +128,20 @@ def linear_rows_to_mercator_rows(latitudes, z, y0, y1):
             / (mercator_top - mercator_bottom))
 
 
-def normalize(elev, e_clip=E_CLIP, gamma=GAMMA):
+def normalize(elev, e_clip=E_CLIP, gamma=GAMMA, sea_level=0.0):
+    """Map elevations to 8-bit grey: sea exactly 0, land 1..255.
+
+    `sea_level` is the elevation (metres) below which a pixel counts as water.
+    SRTM and other DEMs do not put the coastline at exactly 0 m: large tidal
+    flats and reclaimed land are recorded as land, which makes shallow lagoons
+    and polders render as dry ground the engine then refuses to build on. A
+    slightly negative sea level removes them; the master TIFF keeps the raw
+    elevations so nothing is lost.
+    """
     gray = np.zeros_like(elev, dtype=np.uint8)
-    land = elev > 0
-    t = np.clip(elev[land] / e_clip, 0.0, 1.0) ** gamma
+    land = elev > sea_level
+    span = e_clip - sea_level
+    t = np.clip((elev[land] - sea_level) / span, 0.0, 1.0) ** gamma
     gray[land] = (1 + (254.0 * t)).astype(np.uint8)
     return gray
 
@@ -149,6 +159,9 @@ def main(argv=None):
     p.add_argument("--cache-dir", default=os.path.expanduser("~/.cache/hsb/terrarium"))
     p.add_argument("--e-clip", type=float, default=E_CLIP)
     p.add_argument("--gamma", type=float, default=GAMMA)
+    p.add_argument("--sea-level", type=float, default=0.0,
+                   help="elevation in metres below which a pixel is water (use a "
+                        "negative value to drop SRTM tidal flats and polders)")
     p.add_argument("--check-only", action="store_true", help="verify arguments and toolchain, write nothing")
     args = p.parse_args(argv)
 
@@ -169,13 +182,19 @@ def main(argv=None):
     if not math.isfinite(args.gamma) or args.gamma <= 0:
         print("error: --gamma must be finite and positive", file=sys.stderr)
         return 2
+    if not math.isfinite(args.sea_level):
+        print("error: --sea-level must be finite", file=sys.stderr)
+        return 2
+    if args.sea_level >= args.e_clip:
+        print(f"error: --sea-level {args.sea_level} must be below --e-clip {args.e_clip}", file=sys.stderr)
+        return 2
     if not 0 <= args.zoom <= 22:
         print(f"error: --zoom must be in 0..22, got {args.zoom}", file=sys.stderr)
         return 2
 
     if args.check_only:
         print(f"[build-heightmap] bounds={lat_min}-{lat_max}N {lon_min}-{lon_max}E "
-              f"e_clip={args.e_clip} gamma={args.gamma}")
+              f"e_clip={args.e_clip} gamma={args.gamma} sea_level={args.sea_level}")
         print("[build-heightmap] toolchain OK (urllib+numpy+PIL)")
         return 0
 
@@ -237,7 +256,7 @@ def main(argv=None):
         target_lats, z, y0, y1) * (h - 1)
     linear = bilinear_resample(mosaic, args.size, args.size, source_rows, source_cols)
 
-    gray = normalize(linear, e_clip=args.e_clip, gamma=args.gamma)
+    gray = normalize(linear, e_clip=args.e_clip, gamma=args.gamma, sea_level=args.sea_level)
     sea_frac = float((gray == 0).mean())
     print(f"[build-heightmap] sea_fraction={sea_frac:.3f} "
           f"gray_levels={len(np.unique(gray))}")

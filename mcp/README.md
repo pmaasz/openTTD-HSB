@@ -51,15 +51,16 @@ configured engine must already be patched and built per
 
 | Tool | Wraps |
 |---|---|
-| `build_heightmap` | `scripts/build-heightmap.py` (real DEM tiles) |
+| `build_heightmap` | `scripts/build-heightmap.py` (real DEM tiles); `sea_level` drops DEM tidal flats |
 | `write_cities_csv` | authors `cities.csv` |
 | `geocode_towns` | Nominatim lookup → CSV-ready rows; every query must return a row |
 | `build_towns` | `scripts/build-towns.py` → `towns.json`; supports `sample_only` and `strict` |
 | `write_industries` | authors `industries.json` |
 | `write_rivers` | authors `rivers.json` |
+| `render_preview` | `scripts/render-preview.py`; returns `towns_on_water` and fails when non-empty |
 | `validate` | `scripts/validate-scenario.py`; supports `scenario`, `strict`, and timeouts |
-| `write_manifest` | `scripts/build-manifest.py`; forwards seed, terrain, rotation, search-radius, and timeout controls |
-| `run_builder` | runs the fixed `HSB_ENGINE`; stages heightmap and towns automatically |
+| `write_manifest` | `scripts/build-manifest.py`; forwards seed, terrain, rotation, snow line, loan, competitors, currency, and search-radius controls |
+| `run_builder` | runs the fixed `HSB_ENGINE`; stages heightmap and towns automatically; returns the parsed `audit` numbers |
 
 Resources: `hsb://formats` (file schemas), `hsb://workflow` (runbook).
 The agent should read both before starting.
@@ -85,6 +86,25 @@ run_builder(manifest: str, config: str, timeout: int = 1800)
 5. The server runs `HSB_BUILD=<manifest> <HSB_ENGINE> -e -c <config>` from
    `HSB_WORKDIR`. A successful engine exit must also report `hsb: saved`.
 
+## Check the audit, not the exit code
+
+`run_builder` returns an `audit` dict parsed from the builder's own
+measurement of the result:
+
+```python
+{"ok": True, "returncode": 0, "saved": True, "audit": {
+    "towns": 124, "towns_on_water": 0, "industries": 73,
+    "water": 2810000, "sea_fraction": 0.168, "water_bodies": 41,
+    "isolated_water_tiles": 2, "water_unreachable": 310,
+    "carved": 18800, "carved_reachable": 18800}, "output": "..."}
+```
+
+Assert `audit["towns_on_water"] == 0` and
+`audit["carved_reachable"] == audit["carved"]` before treating a build as good:
+a closed pond or a town in a lake both exit 0. `audit` is `{}` when the engine
+logged no audit line (an older binary, or a build that failed before the
+audit). See `docs/FORMATS.md` § *Build log audit line*.
+
 After building, pass the produced scenario path to `validate(scenario=...)`;
 use `strict=True` when generated artifacts must exist.
 
@@ -96,5 +116,6 @@ use `strict=True` when generated artifacts must exist.
 
 The test uses a temporary workdir and a fake executable. It covers data
 authoring, path and symlink confinement, helper cwd, seed/control forwarding,
-geocode failure handling, atomic builder staging, engine validation, MCP schema
-validation, and tool registration/dispatch.
+the town-on-water preview gate, geocode failure handling, atomic builder
+staging, engine validation, audit parsing, MCP schema validation, and tool
+registration/dispatch.

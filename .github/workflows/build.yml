@@ -69,6 +69,7 @@ jobs:
           python3 scripts/build-manifest.py --help
           python3 scripts/build-towns.py --help
           python3 scripts/validate-scenario.py --help
+          python3 scripts/render-preview.py --help
           python3 mcp/test_smoke.py
       - name: Compile-check python
         run: python3 -m compileall scripts builder mcp

@@ -41,6 +41,9 @@ def write_fake_engine(path, log_path):
         "    'cwd': os.getcwd(),\n"
         "    'manifest': os.environ.get('HSB_BUILD'),\n"
         "}))\n"
+        "print('hsb: audit: towns=2 towns_on_water=0 industries=1 water=4096 "
+        "sea_fraction=0.250 water_bodies=1 isolated_water_tiles=0 "
+        "water_unreachable=0 carved=256 carved_reachable=256')\n"
         "print('hsb: saved')\n"
     )
     path.write_text(source, encoding="utf-8")
@@ -174,11 +177,20 @@ def run_smoke(temp_root):
         ], "inputs/rivers.json")
         check("write_rivers", rivers_result)
 
+        preview_result = hsb.do_render_preview(
+            "map.png", "outputs/towns.json", "inputs/industries.json", bounds,
+            out="outputs/preview.png", rivers="inputs/rivers.json",
+        )
+        check("render_preview", preview_result)
+        assert preview_result["towns_on_water"] == [], preview_result
+        assert (work / "outputs/preview.png").is_file()
+
         manifest_result = hsb.do_write_manifest(
             "map.png", "outputs/towns.json", "inputs/industries.json", bounds,
             save="test.scn", rivers="inputs/rivers.json", height=14,
-            rotation="counter-clockwise", seed=424242,
-            industry_search_radius=48, out="outputs/build.json",
+            snow_line=10, rotation="counter-clockwise", seed=424242,
+            industry_search_radius=48, max_loan=1_500_000, competitors=2,
+            currency="EUR", out="outputs/build.json",
         )
         check("write_manifest", manifest_result)
 
@@ -200,6 +212,10 @@ def run_smoke(temp_root):
     assert manifest_data["heightmap_height"] == 14, manifest_data
     assert manifest_data["heightmap_rotation"] == "counter-clockwise", manifest_data
     assert manifest_data["industry_search_radius"] == 48, manifest_data
+    assert manifest_data["snow_line_height"] == 10, manifest_data
+    assert manifest_data["max_loan"] == 1_500_000, manifest_data
+    assert manifest_data["competitors"] == 2, manifest_data
+    assert manifest_data["currency"] == "EUR", manifest_data
 
     (work / "bad-towns.json").write_text("{}", encoding="utf-8")
     malformed = hsb.do_validate(
@@ -217,6 +233,24 @@ def run_smoke(temp_root):
     assert "Traceback" not in malformed.get("output", ""), malformed
     assert any("heightmap" in failure for failure in malformed["failures"]), malformed
     print("[smoke] malformed validator inputs: OK")
+
+    # The preview renderer is a gate: a town anchor in the water must fail the
+    # run and be named, not just logged, and --allow-town-on-water must not.
+    (work / "drowned.json").write_text(json.dumps([
+        {"name": "Beta", "population": 10, "city": False, "x": 0.99, "y": 0.5},
+    ]), encoding="utf-8")
+    drowned = hsb.do_render_preview(
+        "map.png", "drowned.json", "inputs/industries.json", bounds,
+        out="outputs/drowned.png")
+    assert not drowned["ok"], drowned
+    assert drowned["towns_on_water"] == ["Beta"], drowned
+    allowed = hsb.do_render_preview(
+        "map.png", "drowned.json", "inputs/industries.json", bounds,
+        out="outputs/drowned.png", allow_town_on_water=True)
+    check("render_preview allow_town_on_water", allowed)
+    assert allowed["towns_on_water"] == ["Beta"], allowed
+    assert not list((work / "outputs").glob(".render-preview-*"))
+    print("[smoke] render_preview town/water gate: OK")
 
     queries = [
         hsb.GeocodeQuery(name="Alpha", pop=90000),
@@ -324,6 +358,13 @@ def run_smoke(temp_root):
     assert engine_call["argv"] == ["-e", "-c", str(config)], engine_call
     assert engine_call["manifest"] == str(work / "outputs/build.json"), engine_call
     assert engine_call["cwd"] == str(work), engine_call
+    # The builder measures what it built; run_builder must hand those numbers
+    # back as a dict so a caller can assert on them, not grep a log.
+    audit = builder_result["audit"]
+    assert audit["towns"] == 2 and audit["towns_on_water"] == 0, audit
+    assert audit["carved"] == audit["carved_reachable"] == 256, audit
+    assert isinstance(audit["sea_fraction"], float), audit
+    assert hsb._parse_audit("nothing to see here") == {}
 
     async def mcp_check():
         tools = await hsb.mcp.list_tools()
@@ -331,8 +372,8 @@ def run_smoke(temp_root):
         names = sorted(tools_by_name)
         expected_names = sorted([
             "build_heightmap", "write_cities_csv", "geocode_towns",
-            "build_towns", "write_industries", "write_rivers", "validate",
-            "write_manifest", "run_builder",
+            "build_towns", "write_industries", "write_rivers",
+            "render_preview", "validate", "write_manifest", "run_builder",
         ])
         assert names == expected_names, names
         print(f"[smoke] list_tools: OK ({len(names)} tools)")
@@ -345,8 +386,13 @@ def run_smoke(temp_root):
         validate_properties = tools_by_name["validate"].input_schema["properties"]
         assert {"scenario", "strict", "timeout"} <= set(validate_properties)
         manifest_properties = tools_by_name["write_manifest"].input_schema["properties"]
-        assert {"height", "rotation", "seed", "industry_search_radius",
+        assert {"height", "snow_line", "rotation", "seed",
+                "industry_search_radius", "max_loan", "competitors", "currency",
                 "timeout"} <= set(manifest_properties)
+        preview_properties = tools_by_name["render_preview"].input_schema["properties"]
+        assert {"out", "rivers", "size", "allow_town_on_water",
+                "timeout"} <= set(preview_properties)
+        assert "sea_level" in tools_by_name["build_heightmap"].input_schema["properties"]
         bounds_schema = json.dumps(tools_by_name["validate"].input_schema)
         assert '"maximum": 90' in bounds_schema, bounds_schema
         assert '"minimum": -180' in bounds_schema, bounds_schema
