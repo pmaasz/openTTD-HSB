@@ -3,13 +3,13 @@
 
 The headless builder (HSB_BUILD=manifest openttd -e) resolves heightmap +
 towns by basename through the engine file search (scenario/heightmap in the
-personal dir), reads industries.json (and optionally rivers.json) directly,
-and saves the .scn into the scenario dir. See docs/FORMATS.md and
-builder/hsb_builder.* (patches/01-headless-scenario-builder.diff).
+personal dir), reads industries.json (and optionally rivers.json and the
+network files) directly, and saves the .scn into the scenario dir. See
+docs/FORMATS.md and builder/hsb_builder.* (patches/01-headless-scenario-builder.diff).
 
 Bounds (--lat-min/max, --lon-min/max) MUST match the bounds used to build
 the heightmap (scripts/build-heightmap.py) and towns (scripts/build-towns.py):
-they define the lat/lon -> tile mapping for industries and rivers.
+they define the lat/lon -> tile mapping for industries, rivers and the network.
 
 This file is part of openTTD-HSB (GPLv2, see LICENSE.md).
 """
@@ -30,6 +30,17 @@ errors = []
 #: (src/currency.h). The builder rejects an unknown one rather than falling
 #: back silently, so catch the obvious typos before the build does.
 CURRENCY_RE = re.compile(r"[A-Z]{3}")
+
+#: The builder's own limits for the network phase, mirrored from
+#: builder/hsb_builder_net.h (kHsbNetworkMoney, kHsbBusTowns, kHsbTrains).
+#: A limit that exists in the builder but not here is one a caller cannot
+#: discover without reading the log.
+NETWORK_MONEY_RANGE = (0, 4_000_000_000)
+BUS_TOWNS_RANGE = (0, 1024)
+TRAINS_RANGE = (0, 1024)
+
+#: Optional network inputs, in the order the builder reads them.
+NETWORK_FILES = ("roads", "autobahnen", "rail", "airports", "harbours")
 
 
 def fail(msg):
@@ -115,6 +126,14 @@ def validate_output(path, reserved_paths):
     return True
 
 
+def check_range(label, value, bounds):
+    lo, hi = bounds
+    if not lo <= value <= hi:
+        fail(f"{label} must be in {lo}..{hi}, got {value}")
+        return False
+    return True
+
+
 def main(argv=None):
     errors.clear()
     p = argparse.ArgumentParser(description="Write HSB builder manifest")
@@ -146,6 +165,29 @@ def main(argv=None):
     p.add_argument("--currency", default="",
                    help="ISO currency code from the engine table, e.g. EUR; "
                         "empty keeps whatever the -c config says")
+    p.add_argument("--roads", default=None,
+                   help="path to roads.json (network phase: omit to build no roads)")
+    p.add_argument("--autobahnen", default=None,
+                   help="path to autobahn.json (trunk corridors)")
+    p.add_argument("--rail", default=None,
+                   help="path to rail.json (main and branch lines)")
+    p.add_argument("--airports", default=None,
+                   help="path to airports.json (named airports at real positions)")
+    p.add_argument("--harbours", default=None,
+                   help="path to harbours.json (docks on the coast)")
+    p.add_argument("--no-rail", action="store_true",
+                   help="skip the rail phase even if other network files are "
+                        "named; conflicts with --rail")
+    p.add_argument("--no-fleet", action="store_true",
+                   help="build the infrastructure but no rolling stock")
+    p.add_argument("--network-money", type=int, default=0,
+                   help="cash handed to the borrowed infrastructure company for "
+                        "the build; 0 uses the builder default and it is handed "
+                        "back before the save, so it is a scaffold, not a balance")
+    p.add_argument("--bus-towns", type=int, default=None,
+                   help="towns that get a depot, two stops and a bus")
+    p.add_argument("--trains", type=int, default=None,
+                   help="stations that get a spur depot and a train")
     p.add_argument("--out", default="build-manifest.json")
     args = p.parse_args(argv)
 
@@ -167,6 +209,16 @@ def main(argv=None):
     if args.currency and not CURRENCY_RE.fullmatch(args.currency):
         fail(f"--currency must be a 3-letter uppercase code, got {args.currency!r}")
     validate_save_name(args.save)
+    check_range("--network-money", args.network_money, NETWORK_MONEY_RANGE)
+    if args.bus_towns is not None:
+        check_range("--bus-towns", args.bus_towns, BUS_TOWNS_RANGE)
+    if args.trains is not None:
+        check_range("--trains", args.trains, TRAINS_RANGE)
+
+    network_wanted = {name: getattr(args, name) for name in NETWORK_FILES}
+    if args.rail and args.no_rail:
+        fail("--rail and --no-rail disagree; the builder refuses to name a rail "
+             "file it will not build, because track without stations looks broken")
 
     input_paths = {
         "heightmap": os.path.abspath(args.heightmap),
@@ -175,6 +227,18 @@ def main(argv=None):
     }
     if args.rivers:
         input_paths["rivers"] = os.path.abspath(args.rivers)
+    for name, path in network_wanted.items():
+        if path:
+            input_paths[name] = os.path.abspath(path)
+
+    #: The infrastructure company that owns the network takes one company slot.
+    #: With zero or one slot the player opens the save as a spectator with
+    #: nothing to build, which no exit code reveals - only a playthrough does.
+    if any(network_wanted.values()) and args.competitors < 2:
+        fail("--competitors must be at least 2 when a network is built: the "
+             f"infrastructure company takes one slot and the player needs another "
+             f"(got {args.competitors})")
+
     validate_output(args.out, set(input_paths.values()))
     for label, path in input_paths.items():
         is_regular_file(path, label)
@@ -210,6 +274,21 @@ def main(argv=None):
         manifest["currency"] = args.currency
     if args.rivers:
         manifest["rivers"] = input_paths["rivers"]
+    for name, path in network_wanted.items():
+        if path:
+            manifest[name] = input_paths[name]
+    if any(network_wanted.values()):
+        # Only written when a network is actually built, so a manifest with no
+        # network files is byte-identical to one from before the network phase
+        # existed.
+        manifest["with_rail"] = not args.no_rail
+        manifest["with_fleet"] = not args.no_fleet
+        if args.network_money > 0:
+            manifest["network_money"] = args.network_money
+        if args.bus_towns is not None:
+            manifest["bus_towns"] = args.bus_towns
+        if args.trains is not None:
+            manifest["trains"] = args.trains
 
     try:
         payload = json.dumps(manifest, indent=2, allow_nan=False)

@@ -332,6 +332,80 @@ def validate_rivers(path, lat_min, lat_max, lon_min, lon_max):
         print(f"[validate-scenario] rivers.json OK ({len(rivers)} segments)")
 
 
+def validate_corridors(path, label, lat_min, lat_max, lon_min, lon_max):
+    """roads.json / autobahn.json / rail.json: [{name?, waypoints: [[lat,lon],...]}]."""
+    start_errors = len(errors)
+    corridors = read_json(path, label)
+    if corridors is missing:
+        return
+    if not isinstance(corridors, list):
+        fail(f"{label}: top-level value must be an array")
+        return
+
+    for index, corridor in enumerate(corridors):
+        if not isinstance(corridor, dict):
+            fail(f"{label}: entry {index} must be an object")
+            continue
+        name = corridor.get("name", f"entry {index}")
+        if "name" in corridor and (type(corridor["name"]) is not str or not corridor["name"].strip()):
+            fail(f"{label}: entry {index} must have a nonempty string name")
+        waypoints = corridor.get("waypoints")
+        if not isinstance(waypoints, list) or len(waypoints) < 2:
+            fail(f"{label}: at least two waypoints required in {name!r}")
+            continue
+        for waypoint_index, waypoint in enumerate(waypoints):
+            if not isinstance(waypoint, list) or len(waypoint) != 2:
+                fail(f"{label}: waypoint {waypoint_index} in {name!r} must be [lat, lon]")
+                continue
+            lat, lon = waypoint
+            if not is_finite_number(lat) or not is_finite_number(lon):
+                fail(f"{label}: waypoint {waypoint_index} in {name!r} must contain finite numbers")
+            elif not (lat_min <= lat <= lat_max and lon_min <= lon <= lon_max):
+                # The builder rejects a waypoint outside the bounds before routing
+                # anything, so catching it here names the file instead of leaving it
+                # to the log.
+                fail(f"{label}: waypoint {waypoint_index} out of bounds in {name!r}")
+
+    if len(errors) == start_errors:
+        print(f"[validate-scenario] {label} OK ({len(corridors)} corridors)")
+
+
+def validate_places(path, label, lat_min, lat_max, lon_min, lon_max):
+    """airports.json / harbours.json: [{name, xy: [lat, lon]}]."""
+    start_errors = len(errors)
+    places = read_json(path, label)
+    if places is missing:
+        return
+    if not isinstance(places, list):
+        fail(f"{label}: top-level value must be an array")
+        return
+
+    seen = set()
+    for index, place in enumerate(places):
+        if not isinstance(place, dict):
+            fail(f"{label}: entry {index} must be an object")
+            continue
+        name = place.get("name", f"entry {index}")
+        if type(place.get("name")) is not str or not place["name"].strip():
+            fail(f"{label}: entry {index} must have a nonempty string name")
+        elif place["name"] in seen:
+            fail(f"{label}: duplicate name {place['name']!r}")
+        else:
+            seen.add(place["name"])
+        xy = place.get("xy")
+        if not isinstance(xy, list) or len(xy) != 2:
+            fail(f"{label}: entry {index} ({name!r}) needs xy: [lat, lon]")
+            continue
+        lat, lon = xy
+        if not is_finite_number(lat) or not is_finite_number(lon):
+            fail(f"{label}: xy in {name!r} must contain finite numbers")
+        elif not (lat_min <= lat <= lat_max and lon_min <= lon <= lon_max):
+            fail(f"{label}: xy out of bounds in {name!r}")
+
+    if len(errors) == start_errors:
+        print(f"[validate-scenario] {label} OK ({len(places)} places)")
+
+
 def validate_scenario(path, strict):
     try:
         file_stat = os.stat(path)
@@ -371,6 +445,11 @@ def main(argv=None):
     p.add_argument("--towns", default="towns.json")
     p.add_argument("--industries", default="industries.json")
     p.add_argument("--rivers", default=None, help="rivers.json (omit to skip)")
+    p.add_argument("--roads", default=None, help="roads.json (omit to skip)")
+    p.add_argument("--autobahnen", default=None, help="autobahn.json (omit to skip)")
+    p.add_argument("--rail", default=None, help="rail.json (omit to skip)")
+    p.add_argument("--airports", default=None, help="airports.json (omit to skip)")
+    p.add_argument("--harbours", default=None, help="harbours.json (omit to skip)")
     p.add_argument("--scenario", default="output.scn")
     p.add_argument("--lat-min", type=float, required=True)
     p.add_argument("--lat-max", type=float, required=True)
@@ -403,6 +482,13 @@ def main(argv=None):
         validate_rivers(args.rivers, lat_min, lat_max, lon_min, lon_max)
     else:
         print("[validate-scenario] rivers.json check skipped (--rivers omitted)")
+    for label, path in (("roads.json", args.roads), ("autobahn.json", args.autobahnen),
+                        ("rail.json", args.rail)):
+        if path:
+            validate_corridors(path, label, lat_min, lat_max, lon_min, lon_max)
+    for label, path in (("airports.json", args.airports), ("harbours.json", args.harbours)):
+        if path:
+            validate_places(path, label, lat_min, lat_max, lon_min, lon_max)
     validate_scenario(args.scenario, args.strict)
 
     if errors:

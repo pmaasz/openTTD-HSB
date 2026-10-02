@@ -2,10 +2,126 @@
 
 ## Unreleased
 
+### Added — the network phase
+
+The builder can now build a transport network, not just terrain and towns. Every
+sub-phase is opt-in per input file, so a manifest that names none builds exactly
+what it built before: same save, same audit line, no extra keys written.
+
+- **A road network.** Trunk corridors (`autobahn.json`), a town-to-town network
+  (`roads.json`), a spur to every land industry, then a retry sweep, dead-end
+  pruning, town-to-trunk joins and fragment stitching. Corridors are cut into
+  straight pieces of at most `HSB_TUNE_ROAD_RUN` tiles per axis with one
+  right-angle corner per piece — the geometry the player's autoroad tool
+  produces, and the reason a diagonal run does not double in length and take the
+  whole river, cliff band and town belt with it.
+- **A rail network** (`rail.json`): main and branch lines, a station where a
+  line meets a town, and a siding with a depot at every bulk industry worth rail.
+- **Airports and harbours** (`airports.json`, `harbours.json`) at their real
+  positions. The list is data rather than a rule about which cities deserve one:
+  the earlier "most isolated big towns" heuristic put runways where no airport
+  has ever been.
+- **A fleet that moves.** A depot, two stops and a bus for the largest towns; a
+  spur depot and a train for the biggest stations; real orders on both; and the
+  start command pressed, because a vehicle with a perfect route that is still
+  parked in its shed is a museum.
+- **A start view.** The builder picks the town that best shows the network and
+  writes it into the `.scn` as data, so the game opens on a station instead of
+  the empty map corner — and it does so on a **stock, unpatched** engine, which
+  reads the same saved fields.
+- **`builder/hsb_builder_net.h`**, the pure half of the network phase: corner
+  candidates, obstacle weights, chunk geometry, the tunable parser, the
+  dump's character ranking and the manifest range table. No engine types, so all
+  of it is unit tested; the C++ in `hsb_builder.cpp` is the thin layer that asks
+  the engine what a tile is.
+- **Router tunables from the environment** (`HSB_TUNE_ROAD_RUN`,
+  `HSB_TUNE_ROAD_SNAP`, `HSB_TUNE_CORNER_FAN`, `HSB_TUNE_ROAD_TRACE`) plus
+  `HSB_DUMP_NETWORK` and `HSB_FAST`. Defaults are the previously compiled-in
+  values, so an empty environment routes what it always routed. The first line
+  of every build names the configuration, because a log that does not say what
+  produced it cannot be compared with another log.
+- **A network audit line** (`hsb: network audit:`), and `run_builder`'s
+  `network_*` fields. It answers three *different* questions because they were
+  three different answers to "is the network finished?": component counts (is
+  the trunk in pieces?), `towns_on_network` (is any road near each town on the
+  main component?), and the intercity line (can a bus actually be driven there?).
+  Only the last one is the question that matters, and the first two pass for a
+  trunk that stops two tiles short of the kerb.
+- **Pre-save gates.** Exactly one company, at least two company slots, at least
+  one routed and running service, every designed industry still alive, and a
+  start view chosen. Each is a scenario that looks finished and is not, and none
+  is visible from the exit code.
+- **Manifest keys** `roads`, `autobahnen`, `rail`, `airports`, `harbours`,
+  `with_rail`, `with_fleet`, `build_on_slopes`, `autoslope`, `network_money`,
+  `bus_towns`, `trains` — all validated before a byte of map is generated, with
+  `scripts/build-manifest.py` and the MCP `write_manifest` tool refusing the
+  same rules.
+- **New upstream patches**: `HasRailTypeAvail` accepts the editor and worldgen
+  company cases (without it the first rail tile of a scenario segfaults), and
+  the start-view field in the saveload.
+
+### Fixed
+
+All of these were found by running the ported network phase end to end on a
+256-tile map, not by reading the code.
+
+- **`GetString()` on a bare `CMD_ERROR` took the process down.** A command that
+  fails a plain precondition returns a `CommandCost` whose StringID is
+  `INVALID_STRING_ID`, and `GetString` asserts on that. A build that merely
+  could not place one industry died with a crash log instead of logging which
+  one — and the industry placement loop called `GetString(res.GetErrorMessage())`
+  on every failed spiral step. All four call sites go through `HsbWhy()` now,
+  which answers "no reason given".
+- **The refusal tallies were blind to the same thing.** `HsbNoteRoadFailure`
+  returned early on an invalid StringID, so the most common possible refusal
+  contributed nothing to the count. That is how "the road command refuses every
+  tile" produced a log with nothing in it.
+- **No road could ever be built.** `CmdBuildRoad` opens with `if
+  ((Company::IsValidID(company) && town_id != TownID::Invalid()) || ...) return
+  CMD_ERROR;` — a valid company may not name a town. The builder owns its
+  network through a borrowed company and was passing a `TownID` on every tile.
+  Ownership is now the separate step it was always documented to be
+  (`HsbOwnRoadLeg`, the same two writes `CmdBuildRoad` makes), which is also why
+  the ported code compiled at all: it only worked while `_current_company` was
+  still `OWNER_NONE`.
+- **The whole network phase ran with no company.** `AutoRestoreBackup
+  backup_cur_company(_current_company, OWNER_NONE)` and two siblings are
+  function-wide in the engine's other callers; here they restored at the end of
+  `HsbBuildScenario`, so `_current_company` was `OWNER_NONE` and
+  `_generating_world` was still true for every road, station, depot and vehicle
+  below. The engine answered by creating a second company to own the fleet, so
+  the save held a network nobody owned plus a company the player was handed.
+  Scoped to the placement loop.
+- **The construction settings never reached the game.** `build_on_slopes`,
+  `autoslope`, `crossing_with_competitor` and `road_stop_on_town_road` were
+  assigned to `_settings_newgame` *after* `GenerateWorld`, which is the only
+  thing that copies them into `_settings_game`. A silent no-op, with 270 "Site
+  unsuitable for tunnel entrance" refusals as the symptom and no error anywhere.
+  They are set before world generation now, and the build logs the *live*
+  settings rather than the newgame ones.
+- **Handing the trunk to the towns.** Giving a whole 100 km corridor to the
+  nearest town looked like generosity and made the entire network town road, so
+  the railway met the company's own track with "must remove road first" 31 times
+  and laid nothing. Ownership is now limited to the tiles inside the town's own
+  claim: the approach is the town's (which is what makes the town grow along the
+  road that reaches it) and the trunk stays the company's (which is what lets
+  the rail cross it).
+- **A refused build crashed on the way out.** `exit(1)` from `GameLoop` runs on
+  the video thread, so the process unwound through `atexit` handlers with other
+  threads still live: "pure virtual method called", then a crash log, on top of
+  the real error. The hook uses `_exit(1)` with an explicit flush, which is what
+  the engine's own `UserErrorI` does.
+- **`gen-patch.sh` could not run in its own workflow.** After
+  `apply-patches.sh`, the submodule has the previous patch applied and the four
+  `hsb_builder*` files untracked, and the script refused that as a dirty
+  worktree. It now reverses its own patch first. The alternative — telling people
+  to `git checkout --` inside the submodule — silently yields a 0-byte source on
+  an intent-to-add file, which only fails at link time.
+
 Correctness fixes and measurement, ported from the sibling
 `germanyTransportTycoonDeluxe` builder, which found all of these the hard way.
 
-### Fixed
+### Fixed (earlier in this release)
 
 - **River mouths were severed by a one-tile `Coast` water gap.** Every tile along
   the generated shoreline carries `WaterTileType::Coast`, and `IsWaterTile()`
@@ -46,7 +162,7 @@ Correctness fixes and measurement, ported from the sibling
   test made the narrowest rivers paint a 2×2 square, quadrupling them and
   making the carved count disagree with the documented width.
 
-### Added
+### Added (earlier in this release)
 
 - **The build measures itself.** A successful run ends with one machine-readable
   `hsb: audit:` line: `towns`, `towns_on_water`, `industries`, `water`,
@@ -69,7 +185,8 @@ Correctness fixes and measurement, ported from the sibling
 - **Catch2 tests** for the staircase walk (connectivity, monotonicity,
   degenerate cases) and for out-of-range scenario settings.
 - `mcp/server.py`: `render_preview` tool, `build_heightmap(sea_level=…)`,
-  `write_manifest(snow_line/max_loan/competitors/currency)`.
+  `write_manifest(snow_line/max_loan/competitors/currency)`, and the network
+  inputs on `write_manifest` and `validate`.
 
 ## v0.1.0 (release candidate)
 

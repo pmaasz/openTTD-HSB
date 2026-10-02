@@ -438,6 +438,16 @@ def do_write_manifest(heightmap: PathArg, towns: PathArg,
                       max_loan: Annotated[int, Field(ge=0, le=4_000_000_000)] = 0,
                       competitors: Annotated[int, Field(ge=0, le=15)] = 0,
                       currency: str = "",
+                      roads: Optional[PathArg] = None,
+                      autobahnen: Optional[PathArg] = None,
+                      rail: Optional[PathArg] = None,
+                      airports: Optional[PathArg] = None,
+                      harbours: Optional[PathArg] = None,
+                      with_rail: bool = True,
+                      with_fleet: bool = True,
+                      network_money: Annotated[int, Field(ge=0, le=4_000_000_000)] = 0,
+                      bus_towns: Optional[Annotated[int, Field(ge=0, le=1024)]] = None,
+                      trains: Optional[Annotated[int, Field(ge=0, le=1024)]] = None,
                       out: PathArg = "build-manifest.json",
                       timeout: Timeout = 120) -> dict[str, Any]:
     heightmap_path = _confined_path(heightmap, "heightmap path")
@@ -458,6 +468,32 @@ def do_write_manifest(heightmap: PathArg, towns: PathArg,
     if rivers:
         rivers_path = _confined_path(rivers, "rivers path")
         argv += ["--rivers", str(rivers_path)]
+    network = False
+    for label, path in (("roads", roads), ("autobahnen", autobahnen),
+                        ("rail", rail), ("airports", airports),
+                        ("harbours", harbours)):
+        if not path:
+            continue
+        network = True
+        argv += [f"--{label}", str(_confined_path(path, f"{label} path"))]
+    if network:
+        # The infrastructure company that owns the network needs a company slot of
+        # its own, and the player needs a second one; write_manifest is where an
+        # agent finds that out rather than an hour into a build.
+        if competitors < 2:
+            return {"ok": False, "output": (
+                "competitors must be at least 2 when a network is built: the "
+                "infrastructure company takes one slot and the player needs "
+                "another. No manifest was written.")}
+        argv += ["--network-money", str(network_money)]
+        if bus_towns is not None:
+            argv += ["--bus-towns", str(bus_towns)]
+        if trains is not None:
+            argv += ["--trains", str(trains)]
+        if not with_rail:
+            argv.append("--no-rail")
+        if not with_fleet:
+            argv.append("--no-fleet")
     res = _run("build-manifest.py", argv, timeout)
     if res["ok"]:
         res["manifest"] = str(out_path)
@@ -467,6 +503,11 @@ def do_write_manifest(heightmap: PathArg, towns: PathArg,
 def do_validate(heightmap: PathArg, towns: PathArg, industries: PathArg,
                 bounds: Bounds, cities: Optional[PathArg] = None,
                 rivers: Optional[PathArg] = None,
+                roads: Optional[PathArg] = None,
+                autobahnen: Optional[PathArg] = None,
+                rail: Optional[PathArg] = None,
+                airports: Optional[PathArg] = None,
+                harbours: Optional[PathArg] = None,
                 scenario: Optional[PathArg] = None,
                 industry_types: Optional[IndustryTypes] = None, strict: bool = False,
                 timeout: Timeout = 300) -> dict[str, Any]:
@@ -479,6 +520,11 @@ def do_validate(heightmap: PathArg, towns: PathArg, industries: PathArg,
         argv += ["--cities", str(_confined_path(cities, "cities path"))]
     if rivers:
         argv += ["--rivers", str(_confined_path(rivers, "rivers path"))]
+    for label, path in (("roads", roads), ("autobahnen", autobahnen),
+                        ("rail", rail), ("airports", airports),
+                        ("harbours", harbours)):
+        if path:
+            argv += [f"--{label}", str(_confined_path(path, f"{label} path"))]
     if scenario:
         argv += ["--scenario", str(_confined_path(scenario, "scenario path"))]
     if industry_types:
@@ -560,33 +606,48 @@ def do_run_builder(manifest: PathArg, config: PathArg,
             "staged": [str(path) for path in staged], "output": output}
 
 
-def _parse_audit(output: str) -> dict[str, Any]:
-    """Pull the builder's `hsb: audit: k=v ...` line out of the engine log.
-
-    The builder measures what it produced (towns on water, how much carved
-    river a ship can reach). Returning the numbers as a dict means an agent can
-    assert on them instead of reading a log line: towns_on_water must be 0, and
-    carved_reachable should equal carved.
-    """
+def _parse_kv_line(output: str, marker: str) -> dict[str, Any]:
+    """Pull one `marker k=v ...` line out of the engine log into a dict."""
     for line in output.splitlines():
-        _, marker, payload = line.partition("hsb: audit: ")
-        if not marker:
+        _, found, payload = line.partition(marker)
+        if not found:
             continue
-        audit: dict[str, Any] = {}
+        parsed: dict[str, Any] = {}
         for field in payload.split():
             key, separator, value = field.partition("=")
             if not separator:
                 continue
             try:
-                audit[key] = int(value)
+                parsed[key] = int(value)
             except ValueError:
                 try:
-                    audit[key] = float(value)
+                    parsed[key] = float(value)
                 except ValueError:
-                    audit[key] = value
-        if audit:
-            return audit
+                    parsed[key] = value
+        if parsed:
+            return parsed
     return {}
+
+
+def _parse_audit(output: str) -> dict[str, Any]:
+    """Pull the builder's measurement lines out of the engine log.
+
+    The builder measures what it produced (towns on water, how much carved
+    river a ship can reach, and when the network phase ran, what it connected).
+    Returning the numbers as a dict means an agent can assert on them instead of
+    reading a log line: towns_on_water must be 0, and carved_reachable should
+    equal carved.
+
+    Two markers, not one, because the two measurements are independent: a
+    manifest that names no network file produces no network line at all, and a
+    gate that required every key to be present would fail a terrain-only build.
+    They are merged into one dict, with the network keys a plain name can never
+    collide with.
+    """
+    audit = _parse_kv_line(output, "hsb: audit: ")
+    audit.update({f"network_{key}": value
+                  for key, value in _parse_kv_line(output, "hsb: network audit: ").items()})
+    return audit
 
 
 def do_render_preview(heightmap: PathArg, towns: PathArg, industries: PathArg,
@@ -702,12 +763,19 @@ def write_rivers(segments: RiverSegments, path: PathArg) -> dict[str, Any]:
 def validate(heightmap: PathArg, towns: PathArg, industries: PathArg,
              bounds: Bounds, cities: Optional[PathArg] = None,
              rivers: Optional[PathArg] = None,
+             roads: Optional[PathArg] = None,
+             autobahnen: Optional[PathArg] = None,
+             rail: Optional[PathArg] = None,
+             airports: Optional[PathArg] = None,
+             harbours: Optional[PathArg] = None,
              scenario: Optional[PathArg] = None,
              industry_types: Optional[IndustryTypes] = None,
              strict: bool = False, timeout: Timeout = 300) -> dict[str, Any]:
     """Validate scenario inputs (schema, bounds, land/water). Fix failures,
-    don't proceed to run_builder until ok."""
+    don't proceed to run_builder until ok. The network inputs are validated the
+    same way: corridors as {name, waypoints}, airports and harbours as {name, xy}."""
     return do_validate(heightmap, towns, industries, bounds, cities, rivers,
+                       roads, autobahnen, rail, airports, harbours,
                        scenario, industry_types, strict, timeout)
 
 
@@ -737,6 +805,16 @@ def write_manifest(heightmap: PathArg, towns: PathArg, industries: PathArg,
                    max_loan: Annotated[int, Field(ge=0, le=4_000_000_000)] = 0,
                    competitors: Annotated[int, Field(ge=0, le=15)] = 0,
                    currency: str = "",
+                   roads: Optional[PathArg] = None,
+                   autobahnen: Optional[PathArg] = None,
+                   rail: Optional[PathArg] = None,
+                   airports: Optional[PathArg] = None,
+                   harbours: Optional[PathArg] = None,
+                   with_rail: bool = True,
+                   with_fleet: bool = True,
+                   network_money: Annotated[int, Field(ge=0, le=4_000_000_000)] = 0,
+                   bus_towns: Optional[Annotated[int, Field(ge=0, le=1024)]] = None,
+                   trains: Optional[Annotated[int, Field(ge=0, le=1024)]] = None,
                    out: PathArg = "build-manifest.json",
                    timeout: Timeout = 120) -> dict[str, Any]:
     """Write the HSB_BUILD manifest embedding bounds + absolute paths.
@@ -744,11 +822,20 @@ def write_manifest(heightmap: PathArg, towns: PathArg, industries: PathArg,
     competitors defaults to 0: a scenario with no company slots drops the player
     onto the map as a spectator. currency (e.g. "EUR") is pinned in the manifest
     rather than inherited from the -c config, which is machine state.
+
+    Naming any network input turns the network phase on: roads.json and
+    autobahn.json are corridors, rail.json is corridors, airports.json and
+    harbours.json are {name, xy}. The network needs competitors >= 2 - its own
+    company takes one slot and the player needs another - and this refuses before
+    writing rather than after an hour of routing. run_builder's audit reports
+    network_roads, network_intercity_towns, network_vehicles_parked and the rest.
     """
     return do_write_manifest(heightmap, towns, industries, bounds, start_year,
                              save, rivers, height, snow_line, rotation, seed,
                              industry_search_radius, max_loan, competitors,
-                             currency, out, timeout)
+                             currency, roads, autobahnen, rail, airports,
+                             harbours, with_rail, with_fleet, network_money,
+                             bus_towns, trains, out, timeout)
 
 
 @mcp.tool()

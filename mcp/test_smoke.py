@@ -41,9 +41,15 @@ def write_fake_engine(path, log_path):
         "    'cwd': os.getcwd(),\n"
         "    'manifest': os.environ.get('HSB_BUILD'),\n"
         "}))\n"
+        "print('hsb: tune ROAD_RUN=64 ROAD_SNAP=8 ROAD_TRACE=3 CORNER_FAN=0,-2,2')\n"
         "print('hsb: audit: towns=2 towns_on_water=0 industries=1 water=4096 "
         "sea_fraction=0.250 water_bodies=1 isolated_water_tiles=0 "
         "water_unreachable=0 carved=256 carved_reachable=256')\n"
+        "print('hsb: network audit: roads=512 orphan_roads=0 road_components=1 "
+        "largest_road=500 towns=2 towns_on_network=2 rail=64 rail_components=1 "
+        "largest_rail=64 stations=2 stations_with_rail=2 bus_stops=4 depots=3 "
+        "airports=1 docks=1 vehicles=3 consists=3 vehicles_routed=3 "
+        "vehicles_parked=0')\n"
         "print('hsb: saved')\n"
     )
     path.write_text(source, encoding="utf-8")
@@ -177,6 +183,20 @@ def run_smoke(temp_root):
         ], "inputs/rivers.json")
         check("write_rivers", rivers_result)
 
+        # Network-phase inputs. The tool has no writer for these, so the smoke
+        # test writes them directly: what it is checking is that the paths reach
+        # the manifest and the validators, not that a helper round-trips them.
+        (work / "inputs").mkdir(parents=True, exist_ok=True)
+        (work / "inputs/roads.json").write_text(json.dumps([
+            {"name": "Spine", "waypoints": [[18.0, 32.0], [12.0, 38.0]]},
+        ]), encoding="utf-8")
+        (work / "inputs/rail.json").write_text(json.dumps([
+            {"name": "Main", "waypoints": [[18.0, 32.0], [12.0, 38.0]]},
+        ]), encoding="utf-8")
+        (work / "inputs/airports.json").write_text(json.dumps([
+            {"name": "Alpha", "xy": [12.0, 38.0]},
+        ]), encoding="utf-8")
+
         preview_result = hsb.do_render_preview(
             "map.png", "outputs/towns.json", "inputs/industries.json", bounds,
             out="outputs/preview.png", rivers="inputs/rivers.json",
@@ -194,11 +214,34 @@ def run_smoke(temp_root):
         )
         check("write_manifest", manifest_result)
 
+        net_manifest_result = hsb.do_write_manifest(
+            "map.png", "outputs/towns.json", "inputs/industries.json", bounds,
+            save="net.scn", rivers="inputs/rivers.json",
+            competitors=2, roads="inputs/roads.json", rail="inputs/rail.json",
+            airports="inputs/airports.json", bus_towns=2, trains=1,
+            network_money=1000, out="outputs/net.json",
+        )
+        check("write_manifest with a network", net_manifest_result)
+
+        # One slot is not enough: the infrastructure company takes it and the
+        # player would open the save as a spectator. This has to be refused here
+        # rather than an hour into a build.
+        crowded = hsb.do_write_manifest(
+            "map.png", "outputs/towns.json", "inputs/industries.json", bounds,
+            save="net.scn", competitors=1, roads="inputs/roads.json",
+            out="outputs/net-bad.json",
+        )
+        assert not crowded["ok"], crowded
+        assert "at least 2" in crowded["output"], crowded
+        assert not (work / "outputs/net-bad.json").exists(), crowded
+
         scenario = work / "built.scn"
         scenario.write_bytes(b"x" * 100_001)
         validate_result = hsb.do_validate(
             "map.png", "outputs/towns.json", "inputs/industries.json", bounds,
             cities="inputs/cities.csv", rivers="inputs/rivers.json",
+            roads="inputs/roads.json", rail="inputs/rail.json",
+            airports="inputs/airports.json",
             scenario="built.scn", industry_types="Farm", strict=True,
         )
         check("validate", validate_result)
@@ -216,6 +259,22 @@ def run_smoke(temp_root):
     assert manifest_data["max_loan"] == 1_500_000, manifest_data
     assert manifest_data["competitors"] == 2, manifest_data
     assert manifest_data["currency"] == "EUR", manifest_data
+    # A manifest with no network file must not gain network keys: the terrain-only
+    # build is the one that has to keep working unchanged.
+    assert not any(k in manifest_data for k in
+                   ("roads", "rail", "airports", "harbours", "autobahnen",
+                    "with_rail", "with_fleet", "network_money", "bus_towns",
+                    "trains")), manifest_data
+    net_manifest_data = json.loads(
+        (work / "outputs/net.json").read_text(encoding="utf-8"))
+    assert net_manifest_data["roads"].endswith("roads.json"), net_manifest_data
+    assert net_manifest_data["rail"].endswith("rail.json"), net_manifest_data
+    assert net_manifest_data["airports"].endswith("airports.json"), net_manifest_data
+    assert net_manifest_data["with_rail"] is True, net_manifest_data
+    assert net_manifest_data["with_fleet"] is True, net_manifest_data
+    assert net_manifest_data["bus_towns"] == 2, net_manifest_data
+    assert net_manifest_data["trains"] == 1, net_manifest_data
+    assert net_manifest_data["network_money"] == 1000, net_manifest_data
 
     (work / "bad-towns.json").write_text("{}", encoding="utf-8")
     malformed = hsb.do_validate(
@@ -364,6 +423,17 @@ def run_smoke(temp_root):
     assert audit["towns"] == 2 and audit["towns_on_water"] == 0, audit
     assert audit["carved"] == audit["carved_reachable"] == 256, audit
     assert isinstance(audit["sea_fraction"], float), audit
+    # The network phase logs its own line, so a terrain-only build can be told
+    # apart from one that ran it. The keys are prefixed so the two dicts merge
+    # without either shadowing the other's "towns".
+    assert audit["network_road_components"] == 1, audit
+    assert audit["network_vehicles_parked"] == 0, audit
+    assert audit["network_docks"] == 1, audit
+    assert audit["towns"] == 2 and audit["network_towns"] == 2, audit
+    terrain_only = hsb._parse_audit(
+        "hsb: audit: towns=5 towns_on_water=0 carved=1 carved_reachable=1")
+    assert "network_roads" not in terrain_only, terrain_only
+    assert terrain_only["towns"] == 5, terrain_only
     assert hsb._parse_audit("nothing to see here") == {}
 
     async def mcp_check():
@@ -385,10 +455,14 @@ def run_smoke(temp_root):
         assert {"sample_only", "strict", "timeout"} <= set(town_properties)
         validate_properties = tools_by_name["validate"].input_schema["properties"]
         assert {"scenario", "strict", "timeout"} <= set(validate_properties)
+        assert {"roads", "autobahnen", "rail", "airports",
+                "harbours"} <= set(validate_properties), validate_properties
         manifest_properties = tools_by_name["write_manifest"].input_schema["properties"]
         assert {"height", "snow_line", "rotation", "seed",
                 "industry_search_radius", "max_loan", "competitors", "currency",
-                "timeout"} <= set(manifest_properties)
+                "roads", "rail", "airports", "harbours", "with_rail",
+                "with_fleet", "network_money", "bus_towns", "trains",
+                "timeout"} <= set(manifest_properties), sorted(manifest_properties)
         preview_properties = tools_by_name["render_preview"].input_schema["properties"]
         assert {"out", "rivers", "size", "allow_town_on_water",
                 "timeout"} <= set(preview_properties)

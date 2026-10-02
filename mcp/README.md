@@ -58,8 +58,8 @@ configured engine must already be patched and built per
 | `write_industries` | authors `industries.json` |
 | `write_rivers` | authors `rivers.json` |
 | `render_preview` | `scripts/render-preview.py`; returns `towns_on_water` and fails when non-empty |
-| `validate` | `scripts/validate-scenario.py`; supports `scenario`, `strict`, and timeouts |
-| `write_manifest` | `scripts/build-manifest.py`; forwards seed, terrain, rotation, snow line, loan, competitors, currency, and search-radius controls |
+| `validate` | `scripts/validate-scenario.py`; supports the network inputs (`roads`, `autobahnen`, `rail`, `airports`, `harbours`), `scenario`, `strict`, and timeouts |
+| `write_manifest` | `scripts/build-manifest.py`; forwards seed, terrain, rotation, snow line, loan, competitors, currency, search-radius, and the network inputs (`roads`, `autobahnen`, `rail`, `airports`, `harbours`, `with_rail`, `with_fleet`, `network_money`, `bus_towns`, `trains`) |
 | `run_builder` | runs the fixed `HSB_ENGINE`; stages heightmap and towns automatically; returns the parsed `audit` numbers |
 
 Resources: `hsb://formats` (file schemas), `hsb://workflow` (runbook).
@@ -103,7 +103,38 @@ Assert `audit["towns_on_water"] == 0` and
 `audit["carved_reachable"] == audit["carved"]` before treating a build as good:
 a closed pond or a town in a lake both exit 0. `audit` is `{}` when the engine
 logged no audit line (an older binary, or a build that failed before the
-audit). See `docs/FORMATS.md` § *Build log audit line*.
+audit). See `docs/FORMATS.md` § *Build log audit lines*.
+
+### When a network is built
+
+Naming any network input on `write_manifest` turns the network phase on, and
+its measurements come back in the same dict with a `network_` prefix — so the
+two lines merge without either shadowing the other's `towns`:
+
+```python
+{"ok": True, "saved": True, "audit": {
+    "towns": 124, "towns_on_water": 0, "carved": 18800,
+    "carved_reachable": 18800,
+    "network_roads": 73226, "network_road_components": 1,
+    "network_towns_on_network": 124,
+    "network_stations": 61, "network_depots": 48,
+    "network_airports": 27, "network_docks": 21,
+    "network_vehicles": 35, "network_vehicles_routed": 35,
+    "network_vehicles_parked": 0}}
+```
+
+`write_manifest` refuses a network with `competitors < 2` rather than writing a
+manifest that would load as a spectator game, so the error surfaces here and not
+an hour into a build. The keys to assert on:
+
+| Key | Healthy | Why |
+|-----|---------|-----|
+| `network_vehicles_parked` | 0 | a routed vehicle that never left its depot is a museum |
+| `network_road_components` | 1 | more means the trunk is in pieces |
+| `network_towns_on_network` | == `towns` | cheap check; `output` carries the intercity line for the real one |
+
+A build with no network file has **no** `network_*` keys at all, which is how a
+gate tells the two cases apart.
 
 After building, pass the produced scenario path to `validate(scenario=...)`;
 use `strict=True` when generated artifacts must exist.
