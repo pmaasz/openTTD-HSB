@@ -443,6 +443,8 @@ def do_write_manifest(heightmap: PathArg, towns: PathArg,
                       rail: Optional[PathArg] = None,
                       airports: Optional[PathArg] = None,
                       harbours: Optional[PathArg] = None,
+                      stations: Optional[PathArg] = None,
+                      osm: Optional[PathArg] = None,
                       with_rail: bool = True,
                       with_fleet: bool = True,
                       network_money: Annotated[int, Field(ge=0, le=4_000_000_000)] = 0,
@@ -471,11 +473,13 @@ def do_write_manifest(heightmap: PathArg, towns: PathArg,
     network = False
     for label, path in (("roads", roads), ("autobahnen", autobahnen),
                         ("rail", rail), ("airports", airports),
-                        ("harbours", harbours)):
+                        ("harbours", harbours), ("stations", stations)):
         if not path:
             continue
         network = True
         argv += [f"--{label}", str(_confined_path(path, f"{label} path"))]
+    if osm:
+        argv += ["--osm", str(_confined_path(osm, "osm directory"))]
     if network:
         # The infrastructure company that owns the network needs a company slot of
         # its own, and the player needs a second one; write_manifest is where an
@@ -508,6 +512,8 @@ def do_validate(heightmap: PathArg, towns: PathArg, industries: PathArg,
                 rail: Optional[PathArg] = None,
                 airports: Optional[PathArg] = None,
                 harbours: Optional[PathArg] = None,
+                stations: Optional[PathArg] = None,
+                osm: Optional[PathArg] = None,
                 scenario: Optional[PathArg] = None,
                 industry_types: Optional[IndustryTypes] = None, strict: bool = False,
                 timeout: Timeout = 300) -> dict[str, Any]:
@@ -522,9 +528,11 @@ def do_validate(heightmap: PathArg, towns: PathArg, industries: PathArg,
         argv += ["--rivers", str(_confined_path(rivers, "rivers path"))]
     for label, path in (("roads", roads), ("autobahnen", autobahnen),
                         ("rail", rail), ("airports", airports),
-                        ("harbours", harbours)):
+                        ("harbours", harbours), ("stations", stations)):
         if path:
             argv += [f"--{label}", str(_confined_path(path, f"{label} path"))]
+    if osm:
+        argv += ["--osm", str(_confined_path(osm, "osm directory"))]
     if scenario:
         argv += ["--scenario", str(_confined_path(scenario, "scenario path"))]
     if industry_types:
@@ -768,6 +776,8 @@ def validate(heightmap: PathArg, towns: PathArg, industries: PathArg,
              rail: Optional[PathArg] = None,
              airports: Optional[PathArg] = None,
              harbours: Optional[PathArg] = None,
+             stations: Optional[PathArg] = None,
+             osm: Optional[PathArg] = None,
              scenario: Optional[PathArg] = None,
              industry_types: Optional[IndustryTypes] = None,
              strict: bool = False, timeout: Timeout = 300) -> dict[str, Any]:
@@ -775,8 +785,8 @@ def validate(heightmap: PathArg, towns: PathArg, industries: PathArg,
     don't proceed to run_builder until ok. The network inputs are validated the
     same way: corridors as {name, waypoints}, airports and harbours as {name, xy}."""
     return do_validate(heightmap, towns, industries, bounds, cities, rivers,
-                       roads, autobahnen, rail, airports, harbours,
-                       scenario, industry_types, strict, timeout)
+                       roads, autobahnen, rail, airports, harbours, stations,
+                       osm, scenario, industry_types, strict, timeout)
 
 
 @mcp.tool()
@@ -810,6 +820,8 @@ def write_manifest(heightmap: PathArg, towns: PathArg, industries: PathArg,
                    rail: Optional[PathArg] = None,
                    airports: Optional[PathArg] = None,
                    harbours: Optional[PathArg] = None,
+                   stations: Optional[PathArg] = None,
+                   osm: Optional[PathArg] = None,
                    with_rail: bool = True,
                    with_fleet: bool = True,
                    network_money: Annotated[int, Field(ge=0, le=4_000_000_000)] = 0,
@@ -834,8 +846,8 @@ def write_manifest(heightmap: PathArg, towns: PathArg, industries: PathArg,
                              save, rivers, height, snow_line, rotation, seed,
                              industry_search_radius, max_loan, competitors,
                              currency, roads, autobahnen, rail, airports,
-                             harbours, with_rail, with_fleet, network_money,
-                             bus_towns, trains, out, timeout)
+                             harbours, stations, osm, with_rail, with_fleet,
+                             network_money, bus_towns, trains, out, timeout)
 
 
 @mcp.tool()

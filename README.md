@@ -26,6 +26,8 @@ patches/
   render-preview.py         # terrain + rivers + towns + industries PNG, and
                             # a gate: fails when a town anchor lands on water
   build-manifest.py         # write HSB_BUILD manifest (embeds --bounds)
+  osm-reference.py          # Geofabrik/local .osm.pbf -> full OSM reference
+  build-osm-network.py      # OSM reference -> autobahn/rail/stations JSON
   validate-scenario.py      # schema + land/water checks (any --bounds)
   fetch-upstream.sh         # verify submodule pin
   apply-patches.sh          # apply patches/ to upstream
@@ -33,6 +35,8 @@ patches/
   test-builder.sh           # build + run Catch2/CTest builder tests
 /docs/
   FORMATS.md                # manifest + towns/industries/rivers/network schemas
+  OSM.md                    # OSM reference + OSM-derived network pipeline
+  ATTRIBUTION.md            # OSM/ODbL and elevation data credits
   SCENARIO.md               # build runbook
   LOCAL-BUILD.md            # engine build + headless run
 ```
@@ -74,6 +78,14 @@ python3 scripts/build-manifest.py \
   --industries industries.json --rivers rivers.json \
   --lat-min 47.0 --lat-max 55.5 --lon-min 4.0 --lon-max 15.5 \
   --start-year 2025 --snow-line 10 --save output.scn --out /tmp/build.json
+
+# 2a. optional: OSM-derived Autobahn/rail/stations.
+#     pip install pyosmium requests, then:
+python3 scripts/osm-reference.py --work-dir /tmp/osm/work
+python3 scripts/build-osm-network.py --reference-dir assets/geodata/reference \
+  --towns /tmp/towns.json --out-dir assets/geodata \
+  --lat-min 47.0 --lat-max 55.5 --lon-min 4.0 --lon-max 15.5 --size 4096
+#     then pass --osm to build-manifest.py (see docs/OSM.md).
 
 # 2b. optional: the network. Every file is opt-in; name none and the build is
 #     unchanged. competitors >= 2 because the network's own company takes a slot.

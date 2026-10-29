@@ -175,6 +175,16 @@ def main(argv=None):
                    help="path to airports.json (named airports at real positions)")
     p.add_argument("--harbours", default=None,
                    help="path to harbours.json (docks on the coast)")
+    p.add_argument("--stations", default=None,
+                   help="path to stations.json (real OSM station positions, "
+                        "one per town; requires --rail)")
+    p.add_argument("--osm", nargs="?", const="assets/geodata", default=None,
+                   metavar="DIR",
+                   help="use DIR/autobahn-osm.json, DIR/rail-osm.json and "
+                        "DIR/stations-osm.json produced by "
+                        "scripts/build-osm-network.py (default DIR: "
+                        "assets/geodata); explicit --autobahnen/--rail/"
+                        "--stations win")
     p.add_argument("--no-rail", action="store_true",
                    help="skip the rail phase even if other network files are "
                         "named; conflicts with --rail")
@@ -215,7 +225,20 @@ def main(argv=None):
     if args.trains is not None:
         check_range("--trains", args.trains, TRAINS_RANGE)
 
+    if args.osm:
+        if args.autobahnen is None:
+            args.autobahnen = os.path.join(args.osm, "autobahn-osm.json")
+        if args.rail is None:
+            args.rail = os.path.join(args.osm, "rail-osm.json")
+        if args.stations is None:
+            args.stations = os.path.join(args.osm, "stations-osm.json")
+
     network_wanted = {name: getattr(args, name) for name in NETWORK_FILES}
+    if args.stations and not args.rail:
+        fail("--stations places stations on the rail network; it needs --rail")
+    if args.stations and args.no_rail:
+        fail("--stations and --no-rail disagree: there is no rail to place a "
+             "station on")
     if args.rail and args.no_rail:
         fail("--rail and --no-rail disagree; the builder refuses to name a rail "
              "file it will not build, because track without stations looks broken")
@@ -227,6 +250,8 @@ def main(argv=None):
     }
     if args.rivers:
         input_paths["rivers"] = os.path.abspath(args.rivers)
+    if args.stations:
+        input_paths["stations"] = os.path.abspath(args.stations)
     for name, path in network_wanted.items():
         if path:
             input_paths[name] = os.path.abspath(path)
@@ -274,6 +299,8 @@ def main(argv=None):
         manifest["currency"] = args.currency
     if args.rivers:
         manifest["rivers"] = input_paths["rivers"]
+    if args.stations:
+        manifest["stations"] = input_paths["stations"]
     for name, path in network_wanted.items():
         if path:
             manifest[name] = input_paths[name]

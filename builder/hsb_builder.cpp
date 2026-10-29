@@ -115,6 +115,7 @@ struct HsbNetworkSettings {
 	std::string rail;
 	std::string airports;
 	std::string harbours;
+	std::string stations;
 	bool with_rail = true;
 	bool with_fleet = true;
 	/** Construction difficulty settings, pinned rather than inherited. See the
@@ -129,6 +130,14 @@ struct HsbNetworkSettings {
 	CompanyID network_company = CompanyID::Invalid();
 };
 HsbNetworkSettings g_hsb_net;
+
+/** Real station position from stations.json, keyed by town name. */
+struct HsbStationAnchor {
+	double lat = 0.0;
+	double lon = 0.0;
+	std::string name;
+};
+std::map<std::string, HsbStationAnchor> g_hsb_station_anchors;
 
 /** Tiles this builder carved, so the audit can ask whether a ship can reach them. */
 std::vector<TileIndex> g_hsb_carved_water;
@@ -1267,6 +1276,7 @@ bool HsbParseNetworkSettings(const nlohmann::json &manifest, int competitors)
 		if (!HsbOptionalPath(manifest, "rail", g_hsb_net.rail)) return false;
 		if (!HsbOptionalPath(manifest, "airports", g_hsb_net.airports)) return false;
 		if (!HsbOptionalPath(manifest, "harbours", g_hsb_net.harbours)) return false;
+		if (!HsbOptionalPath(manifest, "stations", g_hsb_net.stations)) return false;
 		if (!HsbOptionalBool(manifest, "with_rail", g_hsb_net.with_rail)) return false;
 		if (!HsbOptionalBool(manifest, "with_fleet", g_hsb_net.with_fleet)) return false;
 		if (!HsbOptionalBool(manifest, "build_on_slopes", g_hsb_net.build_on_slopes)) return false;
@@ -1288,6 +1298,10 @@ bool HsbParseNetworkSettings(const nlohmann::json &manifest, int competitors)
 	if (!g_hsb_net.rail.empty() && !g_hsb_net.with_rail) {
 		Debug(Facility::Misc, Severity::Critical, "hsb: manifest names a rail file but with_rail is false; drop one or the other. "
 			"Track without stations and depots looks broken.");
+		return false;
+	}
+	if (!g_hsb_net.stations.empty() && (g_hsb_net.rail.empty() || !g_hsb_net.with_rail)) {
+		Debug(Facility::Misc, Severity::Critical, "hsb: manifest names stations but no rail line to put them on; drop stations or name rail");
 		return false;
 	}
 	if (g_hsb_net.with_fleet && HsbNetworkIsRequested() && !g_hsb_net.with_rail && g_hsb_net.rail.empty()) {
@@ -3395,6 +3409,54 @@ bool HsbReadCorridors(const std::string &path, const char *label, std::vector<st
 	return true;
 }
 
+/**
+ * Real station positions from stations.json, keyed by the town they serve.
+ *
+ * The file is output from scripts/build-osm-network.py: one entry per town,
+ * with the station's real lat/lon. It is optional; without it a station is
+ * placed on the first rail tile the town's spiral finds, exactly as before.
+ */
+bool HsbReadStationAnchors(const std::string &path)
+{
+	std::ifstream file(path);
+	if (!file) {
+		Debug(Facility::Misc, Severity::Critical, "hsb: cannot open stations {}", path);
+		return false;
+	}
+	nlohmann::json json;
+	try {
+		file >> json;
+	} catch (nlohmann::json::exception &e) {
+		Debug(Facility::Misc, Severity::Critical, "hsb: stations parse error: {}", e.what());
+		return false;
+	}
+	if (!json.is_array()) {
+		Debug(Facility::Misc, Severity::Critical, "hsb: stations root must be an array");
+		return false;
+	}
+	g_hsb_station_anchors.clear();
+	for (const auto &entry : json) {
+		if (!entry.contains("town") || !entry.at("town").is_string()
+				|| !entry.contains("lat") || !entry.at("lat").is_number()
+				|| !entry.contains("lon") || !entry.at("lon").is_number()) {
+			Debug(Facility::Misc, Severity::Critical, "hsb: stations entry needs town, lat and lon");
+			return false;
+		}
+		const std::string town = entry.at("town").get<std::string>();
+		const double lat = entry.at("lat").get<double>();
+		const double lon = entry.at("lon").get<double>();
+		if (!HsbCoordinateInBounds(g_hsb_bounds, lat, lon)) {
+			Debug(Facility::Misc, Severity::Critical, "hsb: station for '{}' at ({},{}) is outside the manifest bounds", town, lat, lon);
+			return false;
+		}
+		const std::string name = entry.contains("name") && entry.at("name").is_string()
+			? entry.at("name").get<std::string>() : town;
+		g_hsb_station_anchors[town] = HsbStationAnchor{lat, lon, name};
+	}
+	Debug(Facility::Misc, Severity::Critical, "hsb: station anchors loaded: {}", g_hsb_station_anchors.size());
+	return true;
+}
+
 /** A point-of-interest file: an array of {name, xy: [lat, lon]}. */
 bool HsbReadPlaces(const std::string &path, const char *label,
 	std::vector<std::pair<std::string, std::pair<double, double>>> &out)
@@ -3660,10 +3722,17 @@ uint HsbBuildStations(uint &towns_without_rail)
 	for (const Town *town : Town::Iterate()) {
 		if (town->xy == INVALID_TILE) continue;
 		/* Reach further than a town's own radius: the railway runs beside the town,
-		 * not through it, and a station belongs on the line. */
+		 * not through it, and a station belongs on the line. With OSM stations,
+		 * the spiral starts at the station's real position instead of the town
+		 * centre; the search still finds the nearest track to it. */
+		TileIndex anchor = town->xy;
+		const auto station_it = g_hsb_station_anchors.find(town->name);
+		if (station_it != g_hsb_station_anchors.end()) {
+			anchor = HsbTileFor(station_it->second.lat, station_it->second.lon);
+		}
 		TileIndex spot{};
 		bool have_spot = false;
-		for (TileIndex t : SpiralTileSequence(town->xy, 14, 0, 0)) {
+		for (TileIndex t : SpiralTileSequence(anchor, 14, 0, 0)) {
 			if (!IsValidTile(t) || !IsPlainRailTile(t)) continue;
 			spot = t;
 			have_spot = true;
@@ -4315,6 +4384,7 @@ bool HsbBuildScenario()
 		if (g_hsb_net.with_rail && !g_hsb_net.rail.empty()) {
 			std::vector<std::vector<std::pair<double, double>>> corridors;
 			if (!HsbReadCorridors(g_hsb_net.rail, "rail", corridors)) return false;
+			if (!g_hsb_net.stations.empty() && !HsbReadStationAnchors(g_hsb_net.stations)) return false;
 			uint rail_routed = 0, rail_failed = 0;
 			for (const auto &wps : corridors) {
 				TileIndex prev{};

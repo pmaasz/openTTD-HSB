@@ -406,6 +406,43 @@ def validate_places(path, label, lat_min, lat_max, lon_min, lon_max):
         print(f"[validate-scenario] {label} OK ({len(places)} places)")
 
 
+def validate_stations(path, lat_min, lat_max, lon_min, lon_max, town_names):
+    """stations.json: [{name, town, lat, lon}] from build-osm-network.py."""
+    start_errors = len(errors)
+    stations = read_json(path, "stations.json")
+    if stations is missing:
+        return
+    if not isinstance(stations, list):
+        fail("stations.json: top-level value must be an array")
+        return
+
+    seen_towns = set()
+    for index, station in enumerate(stations):
+        if not isinstance(station, dict):
+            fail(f"stations.json: entry {index} must be an object")
+            continue
+        name = station.get("name")
+        town = station.get("town")
+        if type(name) is not str or not name.strip():
+            fail(f"stations.json: entry {index} must have a nonempty string name")
+        if type(town) is not str or not town.strip():
+            fail(f"stations.json: entry {index} must have a nonempty string town")
+        elif town in seen_towns:
+            fail(f"stations.json: two stations for town {town!r}")
+        else:
+            seen_towns.add(town)
+            if town_names and town not in town_names:
+                fail(f"stations.json: station for unknown town {town!r}")
+        lat, lon = station.get("lat"), station.get("lon")
+        if not is_finite_number(lat) or not is_finite_number(lon):
+            fail(f"stations.json: lat/lon in {name!r} must be finite numbers")
+        elif not (lat_min <= lat <= lat_max and lon_min <= lon <= lon_max):
+            fail(f"stations.json: lat/lon out of bounds in {name!r}")
+
+    if len(errors) == start_errors:
+        print(f"[validate-scenario] stations.json OK ({len(stations)} stations)")
+
+
 def validate_scenario(path, strict):
     try:
         file_stat = os.stat(path)
@@ -450,6 +487,12 @@ def main(argv=None):
     p.add_argument("--rail", default=None, help="rail.json (omit to skip)")
     p.add_argument("--airports", default=None, help="airports.json (omit to skip)")
     p.add_argument("--harbours", default=None, help="harbours.json (omit to skip)")
+    p.add_argument("--stations", default=None,
+                   help="stations.json from build-osm-network.py (omit to skip)")
+    p.add_argument("--osm", nargs="?", const="assets/geodata", default=None,
+                   metavar="DIR",
+                   help="validate DIR/autobahn-osm.json, DIR/rail-osm.json and "
+                        "DIR/stations-osm.json (default DIR: assets/geodata)")
     p.add_argument("--scenario", default="output.scn")
     p.add_argument("--lat-min", type=float, required=True)
     p.add_argument("--lat-max", type=float, required=True)
@@ -463,6 +506,14 @@ def main(argv=None):
     p.add_argument("--strict", action="store_true",
                    help="fail on missing generated artifacts (default: warn)")
     args = p.parse_args(argv)
+
+    if args.osm:
+        if args.autobahnen is None:
+            args.autobahnen = os.path.join(args.osm, "autobahn-osm.json")
+        if args.rail is None:
+            args.rail = os.path.join(args.osm, "rail-osm.json")
+        if args.stations is None:
+            args.stations = os.path.join(args.osm, "stations-osm.json")
 
     lat_min, lat_max, lon_min, lon_max = args.lat_min, args.lat_max, args.lon_min, args.lon_max
     if not validate_bounds(lat_min, lat_max, lon_min, lon_max):
@@ -489,6 +540,8 @@ def main(argv=None):
     for label, path in (("airports.json", args.airports), ("harbours.json", args.harbours)):
         if path:
             validate_places(path, label, lat_min, lat_max, lon_min, lon_max)
+    if args.stations:
+        validate_stations(args.stations, lat_min, lat_max, lon_min, lon_max, town_names)
     validate_scenario(args.scenario, args.strict)
 
     if errors:

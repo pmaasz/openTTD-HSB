@@ -18,6 +18,7 @@ shared lat/lon → tile mapping.
   "rail": "/abs/path/rail.json",
   "airports": "/abs/path/airports.json",
   "harbours": "/abs/path/harbours.json",
+  "stations": "/abs/path/stations.json",
   "with_rail": true,
   "with_fleet": true,
   "build_on_slopes": true,
@@ -45,6 +46,8 @@ shared lat/lon → tile mapping.
   before running (see `docs/SCENARIO.md`).
 * `industries`, `rivers` and every network file: read directly from these
   absolute paths.
+* `stations`: optional, one real OSM station position per town. Needs `rail`;
+  the station search starts at the real position instead of the town centre.
 * `bounds`: required. `lat_min < lat_max`, `lon_min < lon_max`.
 * `rivers`: optional — omit the key (or null/empty) to skip waters.
 * `heightmap_height`: optional, default 12.
@@ -80,6 +83,7 @@ network phase existed.
 | `rail` | same | main and branch lines |
 | `airports` | `[{name, xy}]` | one airport per entry, searched out to 40 tiles |
 | `harbours` | same | one dock per entry, searched from water out to 40 tiles |
+| `stations` | `[{name, town, lat, lon}]` | preferred anchor for a town's rail station; needs `rail` |
 
 | Key | Default | Range | Effect |
 |-----|---------|-------|--------|
@@ -172,6 +176,21 @@ Array of `{name, population, city, x, y}`:
   `row = (lat_max-lat)/(lat_max-lat_min)*(H-1)`.
 * Built by `scripts/build-towns.py` from `cities.csv`
   (`name,lat,lon,pop_real,city,source`).
+
+## stations.json — real OSM station positions
+
+Array of `{name, town, lat, lon, distance_km, category, osm_id}`, one entry per
+matched town, written by `scripts/build-osm-network.py`:
+
+* `name`: OSM station name (e.g. `"Köln Hbf"`).
+* `town`: exact `name` from `towns.json`; the builder matches on this string.
+* `lat`, `lon`: station point in WGS84, inside `bounds`.
+* Extra keys (`distance_km`, `category`, `osm_id`) are provenance and ignored by
+  the builder.
+
+The rail station is still built on the nearest track within 14 tiles of the
+anchor; this only moves the search from the town centre to the real station.
+A town with no entry keeps the old town-centre behaviour.
 
 ## industries.json — placements
 

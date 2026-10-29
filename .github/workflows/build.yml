@@ -70,9 +70,12 @@ jobs:
           python3 scripts/build-towns.py --help
           python3 scripts/validate-scenario.py --help
           python3 scripts/render-preview.py --help
+          python3 scripts/osm-reference.py --self-test
+          python3 scripts/build-osm-network.py --help
+          python3 tests/test_osm_network.py
           python3 mcp/test_smoke.py
       - name: Compile-check python
-        run: python3 -m compileall scripts builder mcp
+        run: python3 -m compileall scripts builder tests mcp
 
   builder-tests:
     name: builder unit tests (ubuntu)

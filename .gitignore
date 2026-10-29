@@ -41,3 +41,7 @@ Thumbs.db
 # Builder manifest (machine-specific absolute paths, generated on demand)
 build-manifest.json
 *-manifest.json
+
+# OSM reference/derived data (generated, large; see docs/OSM.md)
+reference/
+assets/geodata/

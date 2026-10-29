@@ -2,6 +2,38 @@
 
 ## Unreleased
 
+### Changed — OpenTTD 16.0-beta5
+
+- Pinned upstream to `16.0-beta5` (`130bf62a`). The builder moved to the 16.0
+  APIs: scoped `TileType`, `Axis`, `DiagDirection`, `Track`, `TransportType`,
+  `RoadTramType`, `LevelMode`, `Commands`, `SaveLoadOperation`, `Subdirectory`,
+  `GameMode`, `SwitchMode` and `Currency` enums, plus the changed
+  `BuildBridge`, `BuildTunnel`, `TerraformLand` and `RemoveRail` command
+  signatures.
+- Dropped the counter-clockwise town mapping workaround: 16.0 fixes
+  `TranslateCoordinates` upstream, so the patch has no `genworld.cpp` edit left.
+
+### Added — OSM-derived data
+
+- **`scripts/osm-reference.py`** extracts roads, railways and stations from
+  Geofabrik state extracts (or a local `.osm.pbf`) into the shared reference
+  format, using the same linear latitude mapping and transposed axes as
+  `HsbTileForBounds()`.
+- **`scripts/build-osm-network.py`** turns that reference into
+  `autobahn-osm.json`, `rail-osm.json` and `stations-osm.json`, so real
+  motorways, main lines and station positions can feed the optional network
+  phase.
+- **`--osm` / `--stations`** in `scripts/build-manifest.py` and
+  `scripts/validate-scenario.py` (default `assets/geodata`), plus the optional
+  `stations` manifest key. A station entry moves the rail search origin to the
+  real OSM position; the nearest track within 14 tiles is still required, and a
+  town without an entry keeps the old town-centre behaviour.
+- **`tests/test_osm_network.py`** covers projection, network derivation,
+  `--check`, manifest wiring and validation; CI runs it with the reference
+  self-test.
+- **`docs/OSM.md`** and **`docs/ATTRIBUTION.md`** document the pipeline and the
+  ODbL attribution the derived files need.
+
 ### Added — the network phase
 
 The builder can now build a transport network, not just terrain and towns. Every

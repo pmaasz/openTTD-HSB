@@ -17,6 +17,7 @@
  *   "rail":       "/abs/path/rail.json",     // optional
  *   "airports":   "/abs/path/airports.json", // optional
  *   "harbours":   "/abs/path/harbours.json", // optional
+ *   "stations":   "/abs/path/stations.json", // optional, needs rail
  *   "with_rail":  true,                      // optional, default true
  *   "with_fleet": true,                      // optional, default true
  *   "bounds":     {"lat_min": 47.0, "lat_max": 55.5,
@@ -38,8 +39,10 @@
  * }
  * heightmap/towns are resolved by basename through the engine file search
  * (scenario/heightmap in the personal dir); every other data file
- * (industries, rivers, roads, autobahnen, rail, airports, harbours) is read
- * directly; save goes to the scenario dir.
+ * (industries, rivers, roads, autobahnen, rail, airports, harbours, stations)
+ * is read directly; save goes to the scenario dir. stations.json holds one
+ * real OSM station position per town, so the rail station is placed near that
+ * position instead of the town centre.
  *
  * Network phase (optional, all off when the files are absent):
  * The road and rail routers, airports, docks and the starting fleet live in the
