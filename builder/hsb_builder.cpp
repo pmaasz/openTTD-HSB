@@ -1953,8 +1953,8 @@ bool HsbRoadConnected(TileIndex a, TileIndex b, uint max_radius)
 		const uint d = seen[cur];
 		if (cur == b) return true;
 		if (d >= radius) continue;
-		for (const DiagDirection dir : {DiagDirection::SW, DiagDirection::SE, DiagDirection::NW, DiagDirection::NE}) {
-			const TileIndex n = cur + TileOffsByDiagDir(dir);
+		for (const auto &k : kNeighbours) {
+			const TileIndex n = cur + TileDiffXY(k[0], k[1]);
 			if (seen.count(n) != 0 || !walkable(n)) continue;
 			seen[n] = d + 1;
 			queue.push_back(n);
