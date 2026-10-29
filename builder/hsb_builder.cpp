@@ -2434,16 +2434,13 @@ uint HsbPruneDeadEnds()
 			if (HsbRoadNeighbours(cur) != 1) break;   // reached a through tile
 			TileIndex next{};
 			bool have_next = false;
-			for (int dy = -1; dy <= 1 && !have_next; ++dy) {
-				for (int dx = -1; dx <= 1; ++dx) {
-					if (dx == 0 && dy == 0) continue;
-					TileIndex n = cur + TileDiffXY(dx, dy);
-					if (!IsValidTile(n) || !IsNormalRoadTile(n)) continue;
-					if (std::find(branch.begin(), branch.end(), n) != branch.end()) continue;
-					next = n;
-					have_next = true;
-					break;
-				}
+			for (const auto &k : kNeighbours) {
+				TileIndex n = cur + TileDiffXY(k[0], k[1]);
+				if (!IsValidTile(n) || !IsNormalRoadTile(n)) continue;
+				if (std::find(branch.begin(), branch.end(), n) != branch.end()) continue;
+				next = n;
+				have_next = true;
+				break;
 			}
 			if (!have_next) break;
 			cur = next;
