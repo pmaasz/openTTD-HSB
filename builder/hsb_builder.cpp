@@ -2221,13 +2221,11 @@ void HsbJoinTownsToTrunk()
 		if (mine == INVALID_TILE || theirs == INVALID_TILE) { ++towns_nothing; continue; }
 
 		/* Is the town's own road already against the network the builder laid? The
-		 * test is whether a trunk road touches a town road - asking whether a town
-		 * road has a town road next to it is true of every street in the country. */
+		 * test is whether a trunk road touches a town road orthogonally (corner-touching
+		 * is not drivable). */
 		bool touching = false;
-		for (int dy = -1; dy <= 1 && !touching; ++dy) {
-			for (int dx = -1; dx <= 1; ++dx) {
-				if (is_other_road(mine + TileDiffXY(dx, dy))) { touching = true; break; }
-			}
+		for (const auto &k : kNeighbours) {
+			if (is_other_road(mine + TileDiffXY(k[0], k[1]))) { touching = true; break; }
 		}
 		if (touching) { ++towns_already; continue; }
 
