@@ -4386,6 +4386,7 @@ bool HsbBuildScenario()
 
 		/* Rail: main lines from the data, then a station where a line meets a town,
 		 * then a siding with a depot at every bulk industry worth rail. */
+		bool did_rail = false;
 		if (g_hsb_net.with_rail && !g_hsb_net.rail.empty()) {
 			std::vector<std::vector<std::pair<double, double>>> corridors;
 			if (!HsbReadCorridors(g_hsb_net.rail, "rail", corridors)) return false;
@@ -4415,6 +4416,7 @@ bool HsbBuildScenario()
 			Debug(Facility::Misc, Severity::Critical, "hsb: rail totals: {} lines, {} stations, {} sidings, {} depots ({} taken down again)",
 				rail_routed, rail_stations, sidings, depots, stranded);
 			HsbLogIndustries("after rail freight");
+			did_rail = true;
 
 			/* Rolling stock, last: it needs depots from this phase and the stations
 			 * from the rail phase. */
@@ -4422,10 +4424,16 @@ bool HsbBuildScenario()
 				HsbHandOutEngines();
 				HsbServiceCounts service{};
 				HsbBuildBusService(service, g_hsb_net.bus_towns);
-				HsbBuildStationTrains(service, g_hsb_net.trains);
+				if (did_rail) HsbBuildStationTrains(service, g_hsb_net.trains);
 			} else {
 				Debug(Facility::Misc, Severity::Critical, "hsb: fleet not requested; the network is built but nothing runs on it");
 			}
+		} else if (g_hsb_net.with_fleet && HsbNetworkIsRequested()) {
+			HsbHandOutEngines();
+			HsbServiceCounts service{};
+			HsbBuildBusService(service, g_hsb_net.bus_towns);
+		} else if (!g_hsb_net.with_fleet) {
+			Debug(Facility::Misc, Severity::Critical, "hsb: fleet not requested; the network is built but nothing runs on it");
 		}
 
 		/* Airports and docks: the real ones, at their real positions. The list is data
