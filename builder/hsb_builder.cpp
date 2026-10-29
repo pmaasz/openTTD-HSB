@@ -4547,6 +4547,50 @@ bool HsbBuildScenario()
 			return false;
 		}
 		Debug(Facility::Misc, Severity::Critical, "hsb: start view tile is valid: ({},{})", TileX(_hsb_start_view_tile), TileY(_hsb_start_view_tile));
+
+		/* Road network must be connected when a road network was requested. */
+		{
+			const size_t size = Map::Size();
+			const auto is_road = [](TileIndex t) { return IsValidTile(t) && IsNormalRoadTile(t); };
+			std::vector<uint8_t> road(size, 0);
+			uint roads_total = 0;
+			for (uint s = 0; s < size; ++s) {
+				TileIndex t(static_cast<TileIndex::BaseType>(s));
+				if (is_road(t)) { road[s] = 1; ++roads_total; }
+			}
+			if (roads_total > 0) {
+				std::vector<uint32_t> label(size, 0);
+				uint32_t next = 0;
+				uint best = 0;
+				std::vector<TileIndex> queue;
+				queue.reserve(1 << 16);
+				for (uint s = 0; s < size; ++s) {
+					TileIndex start(static_cast<TileIndex::BaseType>(s));
+					if (label[s] || !road[s]) continue;
+					++next;
+					uint count = 0;
+					queue.clear();
+					queue.push_back(start);
+					label[s] = next;
+					while (!queue.empty()) {
+						const TileIndex cur = queue.back();
+						queue.pop_back();
+						++count;
+						for (const auto &d : kHsbNeighbours) {
+							TileIndex n = cur + TileDiffXY(d[0], d[1]);
+							if (!IsValidTile(n) || label[n.base()] || !road[n.base()]) continue;
+							label[n.base()] = next;
+							queue.push_back(n);
+						}
+					}
+					if (count > best) best = count;
+				}
+				if (next > 1) {
+					Debug(Facility::Misc, Severity::Critical, "hsb: ERROR - road network is fragmented into {} components (largest {} tiles)", next, best);
+					return false;
+				}
+			}
+		}
 	}
 
 	if (SaveOrLoad(save, SaveLoadOperation::Save, DetailedFileType::GameFile, Subdirectory::Scenario, false) != SaveLoadResult::Ok) {
