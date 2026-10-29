@@ -30,7 +30,7 @@
 #include "company_func.h"
 #include "company_type.h"
 #include "core/backup_type.hpp"
-#include "currency.h"
+#include "currency_func.h"
 #include "debug.h"
 #include "depot_base.h"
 #include "direction_func.h"
@@ -56,6 +56,7 @@
 #include "road_map.h"
 #include "road_type.h"
 #include "saveload/saveload.h"
+#include "saveload/saveload_func.h"
 #include "settings_type.h"
 #include "signs_base.h"
 #include "station_base.h"
@@ -66,6 +67,7 @@
 #include "terraform_cmd.h"
 #include "tile_map.h"
 #include "tilearea_type.h"
+#include "tilearea_spiral.h"
 #include "timer/timer_game_calendar.h"
 #include "town.h"
 #include "town_map.h"
@@ -180,10 +182,10 @@ int HsbTuneIntEnv(const char *name, int def, int lo, int hi)
 	const int value = HsbTuneInt(raw, def, lo, hi, &clamped);
 	if (raw == nullptr || *raw == '\0') return value;
 	if (clamped) {
-		Debug(misc, 0, "hsb: tune {} = {} is outside {}..{}, clamped to {}", name,
+		Debug(Facility::Misc, Severity::Critical, "hsb: tune {} = {} is outside {}..{}, clamped to {}", name,
 			std::strtol(raw, nullptr, 10), lo, hi, value);
 	} else if (value == def && std::strtol(raw, nullptr, 10) == 0 && def != 0) {
-		Debug(misc, 0, "hsb: tune {} = '{}' is not usable, using {}", name, raw, def);
+		Debug(Facility::Misc, Severity::Critical, "hsb: tune {} = '{}' is not usable, using {}", name, raw, def);
 	}
 	return value;
 }
@@ -231,7 +233,7 @@ void HsbLogTuning()
 		if (!fan_text.empty()) fan_text += ",";
 		fan_text += std::to_string(off);
 	}
-	Debug(misc, 0, "hsb: tune ROAD_RUN={} ROAD_SNAP={} ROAD_TRACE={} CORNER_FAN={}",
+	Debug(Facility::Misc, Severity::Critical, "hsb: tune ROAD_RUN={} ROAD_SNAP={} ROAD_TRACE={} CORNER_FAN={}",
 		HsbRoadRun(), HsbRoadSnap(), HsbRoadTraceLeft(), fan_text);
 }
 
@@ -256,7 +258,7 @@ RailType HsbRailType()
 	for (const RailType rt : GetRailTypes(false)) {
 		if (ValParamRailType(rt)) { chosen = rt; break; }
 	}
-	Debug(misc, 0, "hsb: rail type chosen {}; world offers {}, current company has {}",
+	Debug(Facility::Misc, Severity::Critical, "hsb: rail type chosen {}; world offers {}, current company has {}",
 		static_cast<uint>(chosen), static_cast<uint>(GetRailTypes(false).base()),
 		Company::IsValidID(_current_company) ? static_cast<uint>(Company::Get(_current_company)->avail_railtypes.base()) : 0);
 	return chosen;
@@ -282,7 +284,7 @@ uint8_t HsbAirportType()
 		if (as != nullptr && as->IsAvailable() && !as->layouts.empty()) { chosen = t; break; }
 	}
 	const AirportSpec *as = AirportSpec::Get(chosen);
-	Debug(misc, 0, "hsb: airport type {} with {} layouts", chosen, as == nullptr ? 0 : as->layouts.size());
+	Debug(Facility::Misc, Severity::Critical, "hsb: airport type {} with {} layouts", chosen, as == nullptr ? 0 : as->layouts.size());
 	return chosen;
 }
 
@@ -332,7 +334,7 @@ void HsbWalkSteps(TileIndex from, TileIndex to, Tstep step)
 /**
  * Turn a tile into navigable water, and level it with its neighbours.
  *
- * The guard tests IsWaterTile, not IsTileType(MP_WATER). A tile that is
+ * The guard tests IsWaterTile, not IsTileType(TileType::Water). A tile that is
  * already water but carries a non-Clear WaterTileType - a Coast tile, which
  * the world generator hands out all along the shoreline - must be re-stamped,
  * because IsWaterTile is also the predicate every connectivity mask below
@@ -394,14 +396,14 @@ const char *HsbManifestPath()
 bool HsbParseBounds(const nlohmann::json &manifest)
 {
 	if (!manifest.is_object() || !manifest.contains("bounds") || !manifest.at("bounds").is_object()) {
-		Debug(misc, 0, "hsb: manifest needs a bounds object with lat_min, lat_max, lon_min, and lon_max");
+		Debug(Facility::Misc, Severity::Critical, "hsb: manifest needs a bounds object with lat_min, lat_max, lon_min, and lon_max");
 		return false;
 	}
 	const auto &b = manifest.at("bounds");
 	try {
 		if (!b.at("lat_min").is_number() || !b.at("lat_max").is_number()
 				|| !b.at("lon_min").is_number() || !b.at("lon_max").is_number()) {
-			Debug(misc, 0, "hsb: bounds values must be numbers");
+			Debug(Facility::Misc, Severity::Critical, "hsb: bounds values must be numbers");
 			return false;
 		}
 		g_hsb_bounds.lat_min = b.at("lat_min").get<double>();
@@ -409,18 +411,18 @@ bool HsbParseBounds(const nlohmann::json &manifest)
 		g_hsb_bounds.lon_min = b.at("lon_min").get<double>();
 		g_hsb_bounds.lon_max = b.at("lon_max").get<double>();
 	} catch (nlohmann::json::exception &e) {
-		Debug(misc, 0, "hsb: bad bounds: {}", e.what());
+		Debug(Facility::Misc, Severity::Critical, "hsb: bad bounds: {}", e.what());
 		return false;
 	}
 	if (!(std::isfinite(g_hsb_bounds.lat_min) && std::isfinite(g_hsb_bounds.lat_max)
 			&& std::isfinite(g_hsb_bounds.lon_min) && std::isfinite(g_hsb_bounds.lon_max))) {
-		Debug(misc, 0, "hsb: bounds must be finite");
+		Debug(Facility::Misc, Severity::Critical, "hsb: bounds must be finite");
 		return false;
 	}
 	if (!(g_hsb_bounds.lat_min < g_hsb_bounds.lat_max) || !(g_hsb_bounds.lon_min < g_hsb_bounds.lon_max)
 			|| g_hsb_bounds.lat_min < -90.0 || g_hsb_bounds.lat_max > 90.0
 			|| g_hsb_bounds.lon_min < -180.0 || g_hsb_bounds.lon_max > 180.0) {
-		Debug(misc, 0, "hsb: bounds must be ordered WGS84 intervals");
+		Debug(Facility::Misc, Severity::Critical, "hsb: bounds must be ordered WGS84 intervals");
 		return false;
 	}
 	return true;
@@ -481,7 +483,7 @@ void HsbConnectCarvedWater()
 		if (IsWaterTile(probe) && !carved[s]) { open_water[s] = 1; ++open_total; }
 	}
 	if (open_total == 0) {
-		Debug(misc, 0, "hsb: no open water to connect the carved rivers to");
+		Debug(Facility::Misc, Severity::Critical, "hsb: no open water to connect the carved rivers to");
 		return;
 	}
 
@@ -575,10 +577,10 @@ void HsbConnectCarvedWater()
 			++gave_up;
 		}
 	}
-	Debug(misc, 0, "hsb: carved water bodies {}, already open {}, connected {}, unreachable {}",
+	Debug(Facility::Misc, Severity::Critical, "hsb: carved water bodies {}, already open {}, connected {}, unreachable {}",
 		bodies, already, connected, gave_up);
 	if (gave_up > 0) {
-		Debug(misc, 0, "hsb: {} carved body/bodies are still closed: no open water within {} tiles, "
+		Debug(Facility::Misc, Severity::Critical, "hsb: {} carved body/bodies are still closed: no open water within {} tiles, "
 			"or the channel could not be walked. Extend those river waypoints toward the coast.", gave_up,
 			kHsbConnectRadius);
 	}
@@ -664,7 +666,7 @@ void HsbAuditBuild(uint towns_placed, uint industries_placed)
 	/* One machine-readable line for the terrain/water build; the network phase logs
 	 * its own line right after, so a gate can assert on either without the other
 	 * having run. */
-	Debug(misc, 0, "hsb: audit: towns={} towns_on_water={} industries={} water={} sea_fraction={} "
+	Debug(Facility::Misc, Severity::Critical, "hsb: audit: towns={} towns_on_water={} industries={} water={} sea_fraction={} "
 		"water_bodies={} isolated_water_tiles={} water_unreachable={} carved={} carved_reachable={}",
 		towns_placed, towns_on_water, industries_placed, water_total,
 		size == 0 ? 0.0 : static_cast<double>(water_total) / static_cast<double>(size),
@@ -870,7 +872,7 @@ void HsbAuditNetwork()
 					if (IsValidTile(probe) && !IsWaterTile(probe) && road_on_largest[probe.base()]) ++land_neighbours;
 				}
 			}
-			Debug(misc, 0, "hsb: town not on the road network: {} ({},{}) pop {} nearby network tiles {}",
+			Debug(Facility::Misc, Severity::Critical, "hsb: town not on the road network: {} ({},{}) pop {} nearby network tiles {}",
 				town->name, TileX(town->xy), TileY(town->xy), town->cache.population, land_neighbours);
 			++towns_reported;
 		}
@@ -932,7 +934,7 @@ void HsbAuditNetwork()
 		if (v->IsStoppedInDepot()) ++vehicles_parked;
 	}
 
-	Debug(misc, 0, "hsb: network audit: roads={} orphan_roads={} road_components={} largest_road={} "
+	Debug(Facility::Misc, Severity::Critical, "hsb: network audit: roads={} orphan_roads={} road_components={} largest_road={} "
 		"towns={} towns_on_network={} rail={} rail_components={} largest_rail={} "
 		"stations={} stations_with_rail={} bus_stops={} depots={} airports={} docks={} "
 		"vehicles={} consists={} vehicles_routed={} vehicles_parked={}",
@@ -940,7 +942,7 @@ void HsbAuditNetwork()
 		towns_total, towns_on_network, rails_total, rail_components, largest_rail,
 		stations, stations_with_rail, bus_stops, depots, airports, docks,
 		vehicles, primaries, vehicles_routed, vehicles_parked);
-	Debug(misc, 0, "hsb: intercity road: a bus from the largest town (pop {}) reaches {} of {} towns",
+	Debug(Facility::Misc, Severity::Critical, "hsb: intercity road: a bus from the largest town (pop {}) reaches {} of {} towns",
 		intercity_from, intercity_towns, towns_total);
 
 	/* Where the gap is: for the ten biggest towns, how far the nearest corridor is.
@@ -970,7 +972,7 @@ void HsbAuditNetwork()
 					}
 				}
 			}
-			Debug(misc, 0, "hsb: nearest road to {} ({},{}) is {} tiles away (pop {})",
+			Debug(Facility::Misc, Severity::Critical, "hsb: nearest road to {} ({},{}) is {} tiles away (pop {})",
 				t->name, TileX(t->xy), TileY(t->xy), best, t->cache.population);
 		}
 	}
@@ -987,28 +989,28 @@ bool HsbCarveWaters(const nlohmann::json &manifest)
 	try {
 		rivers_path = manifest.at("rivers").get<std::string>();
 	} catch (nlohmann::json::exception &e) {
-		Debug(misc, 0, "hsb: bad rivers path: {}", e.what());
+		Debug(Facility::Misc, Severity::Critical, "hsb: bad rivers path: {}", e.what());
 		return false;
 	}
 	if (rivers_path.empty()) return true;
 	if (!std::filesystem::path(rivers_path).is_absolute()) {
-		Debug(misc, 0, "hsb: rivers path must be absolute");
+		Debug(Facility::Misc, Severity::Critical, "hsb: rivers path must be absolute");
 		return false;
 	}
 	std::ifstream river_file(rivers_path);
 	if (!river_file) {
-		Debug(misc, 0, "hsb: cannot open {}", rivers_path);
+		Debug(Facility::Misc, Severity::Critical, "hsb: cannot open {}", rivers_path);
 		return false;
 	}
 	nlohmann::json rivers;
 	try {
 		river_file >> rivers;
 	} catch (nlohmann::json::exception &e) {
-		Debug(misc, 0, "hsb: rivers parse error: {}", e.what());
+		Debug(Facility::Misc, Severity::Critical, "hsb: rivers parse error: {}", e.what());
 		return false;
 	}
 	if (!rivers.is_array()) {
-		Debug(misc, 0, "hsb: rivers root must be an array");
+		Debug(Facility::Misc, Severity::Critical, "hsb: rivers root must be an array");
 		return false;
 	}
 
@@ -1019,36 +1021,36 @@ bool HsbCarveWaters(const nlohmann::json &manifest)
 					|| !seg.contains("class") || !seg.at("class").is_string()
 					|| !seg.contains("width") || !seg.at("width").is_number_integer()
 					|| !seg.contains("waypoints") || !seg.at("waypoints").is_array()) {
-				Debug(misc, 0, "hsb: invalid river segment schema");
+				Debug(Facility::Misc, Severity::Critical, "hsb: invalid river segment schema");
 				return false;
 			}
 			const std::string class_name = seg.at("class").get<std::string>();
 			if (class_name != "river" && class_name != "sea") {
-				Debug(misc, 0, "hsb: river class must be river or sea");
+				Debug(Facility::Misc, Severity::Critical, "hsb: river class must be river or sea");
 				return false;
 			}
 			const bool sea = class_name == "sea";
 			const int width = seg.at("width").get<int>();
 			if (width < 1 || width > 3) {
-				Debug(misc, 0, "hsb: river width must be 1..3");
+				Debug(Facility::Misc, Severity::Critical, "hsb: river width must be 1..3");
 				return false;
 			}
 			const auto &wps = seg.at("waypoints");
 			if (wps.size() < 2) {
-				Debug(misc, 0, "hsb: river '{}' needs at least two waypoints", seg.at("name").get<std::string>());
+				Debug(Facility::Misc, Severity::Critical, "hsb: river '{}' needs at least two waypoints", seg.at("name").get<std::string>());
 				return false;
 			}
 			for (size_t i = 0; i + 1 < wps.size(); ++i) {
 				if (!wps[i].is_array() || wps[i].size() != 2 || !wps[i + 1].is_array() || wps[i + 1].size() != 2
 						|| !wps[i].at(0).is_number() || !wps[i].at(1).is_number()
 						|| !wps[i + 1].at(0).is_number() || !wps[i + 1].at(1).is_number()) {
-					Debug(misc, 0, "hsb: river waypoints must be numeric [lat, lon] pairs");
+					Debug(Facility::Misc, Severity::Critical, "hsb: river waypoints must be numeric [lat, lon] pairs");
 					return false;
 				}
 				double lat0 = wps[i].at(0).get<double>(), lon0 = wps[i].at(1).get<double>();
 				double lat1 = wps[i + 1].at(0).get<double>(), lon1 = wps[i + 1].at(1).get<double>();
 				if (!HsbCoordinateInBounds(g_hsb_bounds, lat0, lon0) || !HsbCoordinateInBounds(g_hsb_bounds, lat1, lon1)) {
-					Debug(misc, 0, "hsb: river waypoint is outside finite bounds");
+					Debug(Facility::Misc, Severity::Critical, "hsb: river waypoint is outside finite bounds");
 					return false;
 				}
 				double dist = std::max(std::abs(lat1 - lat0), std::abs(lon1 - lon0));
@@ -1073,10 +1075,10 @@ bool HsbCarveWaters(const nlohmann::json &manifest)
 			}
 		}
 	} catch (nlohmann::json::exception &e) {
-		Debug(misc, 0, "hsb: invalid river data: {}", e.what());
+		Debug(Facility::Misc, Severity::Critical, "hsb: invalid river data: {}", e.what());
 		return false;
 	}
-	Debug(misc, 0, "hsb: carved {} water tiles", carved);
+	Debug(Facility::Misc, Severity::Critical, "hsb: carved {} water tiles", carved);
 	HsbConnectCarvedWater();
 	FixSlopes();
 	MarkWholeScreenDirty();
@@ -1087,14 +1089,14 @@ bool HsbValidateTownData(const std::string &path, size_t &town_count)
 {
 	std::ifstream input(path);
 	if (!input) {
-		Debug(misc, 0, "hsb: cannot open towns data {}", path);
+		Debug(Facility::Misc, Severity::Critical, "hsb: cannot open towns data {}", path);
 		return false;
 	}
 	nlohmann::json towns;
 	try {
 		input >> towns;
 		if (!towns.is_array() || towns.empty()) {
-			Debug(misc, 0, "hsb: towns root must be a nonempty array");
+			Debug(Facility::Misc, Severity::Critical, "hsb: towns root must be a nonempty array");
 			return false;
 		}
 		std::set<std::string> names;
@@ -1104,7 +1106,7 @@ bool HsbValidateTownData(const std::string &path, size_t &town_count)
 					|| !town.contains("city") || !town.at("city").is_boolean()
 					|| !town.contains("x") || !town.at("x").is_number()
 					|| !town.contains("y") || !town.at("y").is_number()) {
-				Debug(misc, 0, "hsb: invalid town entry schema");
+				Debug(Facility::Misc, Severity::Critical, "hsb: invalid town entry schema");
 				return false;
 			}
 			const std::string name = town.at("name").get<std::string>();
@@ -1113,13 +1115,13 @@ bool HsbValidateTownData(const std::string &path, size_t &town_count)
 			const double y = town.at("y").get<double>();
 			if (name.empty() || name.size() >= 32 || !names.insert(name).second || population == 0 || population > std::numeric_limits<uint>::max()
 					|| !std::isfinite(x) || !std::isfinite(y) || x <= 0.0 || x >= 1.0 || y <= 0.0 || y >= 1.0) {
-				Debug(misc, 0, "hsb: invalid town entry '{}'", name);
+				Debug(Facility::Misc, Severity::Critical, "hsb: invalid town entry '{}'", name);
 				return false;
 			}
 		}
 		town_count = towns.size();
 	} catch (nlohmann::json::exception &e) {
-		Debug(misc, 0, "hsb: invalid towns data: {}", e.what());
+		Debug(Facility::Misc, Severity::Critical, "hsb: invalid towns data: {}", e.what());
 		return false;
 	}
 	return true;
@@ -1164,7 +1166,7 @@ void HsbNoteRoadFailure(CommandCost res, const char *what, TileIndex t)
 {
 	const StringID why = res.GetErrorMessage();
 	if (g_hsb_road_failures.find(why) == g_hsb_road_failures.end()) {
-		Debug(misc, 0, "hsb: first road {} refusal: ({},{}) tile type {} slope {}: {}", what,
+		Debug(Facility::Misc, Severity::Critical, "hsb: first road {} refusal: ({},{}) tile type {} slope {}: {}", what,
 			TileX(t), TileY(t), GetTileType(t), GetTileSlope(t),
 			why == kNoReason ? "<no reason given>" : GetString(why));
 	}
@@ -1179,9 +1181,9 @@ void HsbNoteRailFailure(CommandCost res, TileIndex t, const char *from = "?")
 	 * turns thousands of identical lines of log into one number worth acting on. */
 	const std::string key = std::string(from) + ": " +
 		(why == kNoReason ? std::string("<no reason given>") : GetString(why)) +
-		" [tile type " + std::to_string(GetTileType(t)) + "]";
+		" [tile type " + std::to_string(to_underlying(GetTileType(t))) + "]";
 	if (g_hsb_rail_failures.find(key) == g_hsb_rail_failures.end()) {
-		Debug(misc, 0, "hsb: first rail refusal at ({},{}) type {} slope {}: {}",
+		Debug(Facility::Misc, Severity::Critical, "hsb: first rail refusal at ({},{}) type {} slope {}: {}",
 			TileX(t), TileY(t), GetTileType(t), GetTileSlope(t),
 			why == kNoReason ? "<no reason given>" : GetString(why));
 	}
@@ -1206,13 +1208,13 @@ bool HsbOptionalPath(const nlohmann::json &manifest, const char *key, std::strin
 {
 	if (!manifest.contains(key) || manifest.at(key).is_null()) return true;
 	if (!manifest.at(key).is_string()) {
-		Debug(misc, 0, "hsb: manifest '{}' must be a string path or null", key);
+		Debug(Facility::Misc, Severity::Critical, "hsb: manifest '{}' must be a string path or null", key);
 		return false;
 	}
 	const std::string path = manifest.at(key).get<std::string>();
 	if (path.empty()) return true;
 	if (!std::filesystem::path(path).is_absolute() || !HsbSafeFilename(BasenameOf(path))) {
-		Debug(misc, 0, "hsb: manifest '{}' must be an absolute path to a plain filename", key);
+		Debug(Facility::Misc, Severity::Critical, "hsb: manifest '{}' must be an absolute path to a plain filename", key);
 		return false;
 	}
 	out = path;
@@ -1225,12 +1227,12 @@ bool HsbOptionalRange(const nlohmann::json &manifest, const char *key, const Hsb
 	out = range.fallback;
 	if (!manifest.contains(key) || manifest.at(key).is_null()) return true;
 	if (!manifest.at(key).is_number_integer()) {
-		Debug(misc, 0, "hsb: manifest '{}' must be an integer or null", key);
+		Debug(Facility::Misc, Severity::Critical, "hsb: manifest '{}' must be an integer or null", key);
 		return false;
 	}
 	const int64_t value = manifest.at(key).get<int64_t>();
 	if (!HsbInRange(range, value)) {
-		Debug(misc, 0, "hsb: manifest '{}' is {}, want {}..{}", key, value, range.lo, range.hi);
+		Debug(Facility::Misc, Severity::Critical, "hsb: manifest '{}' is {}, want {}..{}", key, value, range.lo, range.hi);
 		return false;
 	}
 	out = value;
@@ -1242,7 +1244,7 @@ bool HsbOptionalBool(const nlohmann::json &manifest, const char *key, bool &out)
 {
 	if (!manifest.contains(key) || manifest.at(key).is_null()) return true;
 	if (!manifest.at(key).is_boolean()) {
-		Debug(misc, 0, "hsb: manifest '{}' must be true, false or null", key);
+		Debug(Facility::Misc, Severity::Critical, "hsb: manifest '{}' must be true, false or null", key);
 		return false;
 	}
 	out = manifest.at(key).get<bool>();
@@ -1277,23 +1279,23 @@ bool HsbParseNetworkSettings(const nlohmann::json &manifest, int competitors)
 		g_hsb_net.bus_towns = static_cast<uint>(bus_towns);
 		g_hsb_net.trains = static_cast<uint>(trains);
 	} catch (nlohmann::json::exception &e) {
-		Debug(misc, 0, "hsb: invalid network manifest fields: {}", e.what());
+		Debug(Facility::Misc, Severity::Critical, "hsb: invalid network manifest fields: {}", e.what());
 		return false;
 	}
 
 	/* Three cross-field rules, all of which are a scenario that is wrong in a
 	 * way only a player would notice. */
 	if (!g_hsb_net.rail.empty() && !g_hsb_net.with_rail) {
-		Debug(misc, 0, "hsb: manifest names a rail file but with_rail is false; drop one or the other. "
+		Debug(Facility::Misc, Severity::Critical, "hsb: manifest names a rail file but with_rail is false; drop one or the other. "
 			"Track without stations and depots looks broken.");
 		return false;
 	}
 	if (g_hsb_net.with_fleet && HsbNetworkIsRequested() && !g_hsb_net.with_rail && g_hsb_net.rail.empty()) {
-		Debug(misc, 0, "hsb: manifest asks for a fleet with no rail and no roads; there would be nothing to run on");
+		Debug(Facility::Misc, Severity::Critical, "hsb: manifest asks for a fleet with no rail and no roads; there would be nothing to run on");
 		return false;
 	}
 	if (HsbNetworkIsRequested() && competitors < 2) {
-		Debug(misc, 0, "hsb: manifest asks for a network (competitors {}) but the infrastructure company "
+		Debug(Facility::Misc, Severity::Critical, "hsb: manifest asks for a network (competitors {}) but the infrastructure company "
 			"takes one of those slots; the player needs at least 2. Raise --competitors.", competitors);
 		return false;
 	}
@@ -1303,18 +1305,18 @@ bool HsbParseNetworkSettings(const nlohmann::json &manifest, int competitors)
 void HsbReportRoadFailures()
 {
 	if (g_hsb_road_failures.empty()) {
-		Debug(misc, 0, "hsb: road refusals: none");
+		Debug(Facility::Misc, Severity::Critical, "hsb: road refusals: none");
 		return;
 	}
 	std::vector<std::pair<uint, StringID>> by_count;
 	for (const auto &kv : g_hsb_road_failures) by_count.emplace_back(kv.second, kv.first);
 	std::sort(by_count.begin(), by_count.end(), [](const auto &l, const auto &r) { return l.first > r.first; });
 	for (const auto &kv : by_count) {
-		Debug(misc, 0, "hsb: road refusal x{}: {}", kv.first,
+		Debug(Facility::Misc, Severity::Critical, "hsb: road refusal x{}: {}", kv.first,
 			kv.second == kNoReason ? std::string("<no reason given>") : GetString(kv.second));
 	}
 	for (const auto &kv : g_hsb_rail_failures) {
-		Debug(misc, 0, "hsb: rail refusal x{}: {}", kv.second, kv.first);
+		Debug(Facility::Misc, Severity::Critical, "hsb: rail refusal x{}: {}", kv.second, kv.first);
 	}
 }
 
@@ -1336,7 +1338,7 @@ uint HsbCountIndustries()
 
 void HsbLogIndustries(const char *where)
 {
-	Debug(misc, 0, "hsb: industries alive: {} {}", HsbCountIndustries(), where);
+	Debug(Facility::Misc, Severity::Critical, "hsb: industries alive: {} {}", HsbCountIndustries(), where);
 }
 
 /** Road this build created, so a corridor that cannot be finished can be taken
@@ -1353,7 +1355,7 @@ void HsbUndoRoadFrom(size_t mark)
 	for (size_t i = g_hsb_road_new_tiles.size(); i > mark; --i) {
 		const TileIndex t = g_hsb_road_new_tiles[i - 1];
 		if (!IsValidTile(t) || !IsNormalRoadTile(t)) continue;
-		Command<CMD_BUILD_ROAD>::Do(kExec, t, ROAD_NONE, HsbRoadType(), DRD_NONE, TownID::Invalid());
+		Command<Commands::BuildRoad>::Do(kExec, t, RoadBits{}, HsbRoadType(), DisallowedRoadDirections{}, TownID::Invalid());
 	}
 	if (g_hsb_road_new_tiles.size() > mark) g_hsb_road_new_tiles.resize(mark);
 }
@@ -1365,8 +1367,8 @@ void HsbUndoRailFrom(size_t mark)
 	for (size_t i = g_hsb_rail_new_tiles.size(); i > mark; --i) {
 		const TileIndex t = g_hsb_rail_new_tiles[i - 1];
 		if (IsValidTile(t) && IsPlainRailTile(t)) {
-			Command<CMD_REMOVE_RAILROAD_TRACK>::Do(kExec, t, t, TRACK_X);
-			Command<CMD_REMOVE_RAILROAD_TRACK>::Do(kExec, t, t, TRACK_Y);
+			Command<Commands::RemoveRail>::Do(kExec, t, Track::X);
+			Command<Commands::RemoveRail>::Do(kExec, t, Track::Y);
 		}
 	}
 	if (g_hsb_rail_new_tiles.size() > mark) g_hsb_rail_new_tiles.resize(mark);
@@ -1402,7 +1404,7 @@ bool HsbWaterSpannable(TileIndex t, int dx, int dy, TileIndex *out_lo = nullptr,
 		const TileIndex c = at(step);
 		if (!IsValidTile(c) || IsWaterTile(c) || GetTileSlope(c) != SLOPE_FLAT) return INVALID_TILE;
 		const TileType tt = GetTileType(c);
-		return (tt == MP_CLEAR || tt == MP_TREES || IsPlainRailTile(c) || IsNormalRoadTile(c)) ? c : INVALID_TILE;
+		return (tt == TileType::Clear || tt == TileType::Trees || IsPlainRailTile(c) || IsNormalRoadTile(c)) ? c : INVALID_TILE;
 	};
 	TileIndex lo = INVALID_TILE, hi = INVALID_TILE;
 	for (int k = 1; k <= 24 && (lo == INVALID_TILE || hi == INVALID_TILE); ++k) {
@@ -1428,8 +1430,8 @@ bool HsbBridgeSpanIsClear(TileIndex lo, TileIndex hi, int dx, int dy)
 {
 	for (TileIndex c = lo; c != hi;) {
 		const TileType tt = GetTileType(c);
-		if (!IsWaterTile(c) && tt != MP_CLEAR && tt != MP_TREES) {
-			Debug(misc, 0, "hsb: bridge from ({},{}) to ({},{}) would cross tile type {}; not building it",
+		if (!IsWaterTile(c) && tt != TileType::Clear && tt != TileType::Trees) {
+			Debug(Facility::Misc, Severity::Critical, "hsb: bridge from ({},{}) to ({},{}) would cross tile type {}; not building it",
 				TileX(lo), TileY(lo), TileX(hi), TileY(hi), static_cast<int>(tt));
 			return false;
 		}
@@ -1442,15 +1444,15 @@ bool HsbBridgeSpanIsClear(TileIndex lo, TileIndex hi, int dx, int dy)
 bool HsbSpanWater(TileIndex t, Axis axis)
 {
 	constexpr DoCommandFlags kStruct{DoCommandFlag::Execute};
-	const int dx = (axis == AXIS_X) ? 1 : 0;
-	const int dy = (axis == AXIS_X) ? 0 : 1;
+	const int dx = (axis == Axis::X) ? 1 : 0;
+	const int dy = (axis == Axis::X) ? 0 : 1;
 	TileIndex lo{}, hi{};
 	if (!HsbWaterSpannable(t, dx, dy, &lo, &hi)) return false;
 	if (!HsbBridgeSpanIsClear(lo, hi, dx, dy)) {
 		HsbNoteRoadFailure(CommandCost(STR_ERROR_NO_SUITABLE_ROAD), "span", t);
 		return false;
 	}
-	if (!Command<CMD_BUILD_BRIDGE>::Do(kStruct, lo, hi, TRANSPORT_ROAD, 0, HsbRoadType()).Succeeded()) {
+	if (!Command<Commands::BuildBridge>::Do(kStruct, lo, hi, TransportType::Road, 0, INVALID_RAILTYPE, HsbRoadType()).Succeeded()) {
 		HsbNoteRoadFailure(CommandCost(STR_ERROR_NO_SUITABLE_ROAD), "span", t);
 		return false;
 	}
@@ -1474,7 +1476,7 @@ bool HsbSpanWater(TileIndex t, Axis axis)
  *    the ground itself and there is nothing to do.
  *
  * The industry check is explicit and local rather than left to DoCommandFlag::
- * Auto, because CMD_LANDSCAPE_CLEAR has no industry check at all: the road
+ * Auto, because Commands::LandscapeClear has no industry check at all: the road
  * command converts an industry tile whether or not Auto is set, Auto only
  * decides who pays for it. A corridor that no longer fits is a routing problem
  * the audit can report, not eleven silently missing industries.
@@ -1491,7 +1493,7 @@ bool HsbBuildRoadTile(TileIndex t, RoadBits bits, bool dry_run = false)
 	constexpr DoCommandFlags kStructDry{DoCommandFlag::Auto};
 	const DoCommandFlags kExec = dry_run ? kExecDry : kExecLive;
 	const DoCommandFlags kStruct = dry_run ? kStructDry : kStructLive;
-	const Axis axis = (bits == ROAD_X) ? AXIS_X : AXIS_Y;
+	const Axis axis = (bits == ROAD_X) ? Axis::X : Axis::Y;
 
 	/* TownID::Invalid() always, never a town.
 	 *
@@ -1508,7 +1510,7 @@ bool HsbBuildRoadTile(TileIndex t, RoadBits bits, bool dry_run = false)
 	/* Checked before anything else, not inside build(), because the levelling and
 	 * tunnelling attempts below run first and carry Auto too: guarding only the
 	 * road build still lets a bulldozer through the back door. */
-	if (IsTileType(t, MP_INDUSTRY)) {
+	if (IsTileType(t, TileType::Industry)) {
 		HsbNoteRoadFailure(CommandCost(STR_ERROR_OBJECT_IN_THE_WAY), "industry", t);
 		return false;
 	}
@@ -1516,14 +1518,14 @@ bool HsbBuildRoadTile(TileIndex t, RoadBits bits, bool dry_run = false)
 	StringID first_why = INVALID_STRING_ID;
 	auto build = [&]() {
 		const bool was_road = IsNormalRoadTile(t);
-		CommandCost res = Command<CMD_BUILD_ROAD>::Do(kExec, t, bits, HsbRoadType(), DRD_NONE, TownID::Invalid());
+		CommandCost res = Command<Commands::BuildRoad>::Do(kExec, t, bits, HsbRoadType(), DisallowedRoadDirections{}, TownID::Invalid());
 		/* "Already built" is not the same as "a road vehicle can use this".
 		 * Trusting the reply is how a leg reported success across a gap it never
 		 * closed: stitching routed between two pieces two tiles apart, was told
 		 * yes, and found them still separate hundreds of times over.
 		 *
 		 * Not trusting it naively is worse, and was: the first fix demanded
-		 * IsNormalRoadTile, which a LEVEL CROSSING fails - MP_ROAD, but not normal
+		 * IsNormalRoadTile, which a LEVEL CROSSING fails - TileType::Road, but not normal
 		 * road. Rail crosses the road network constantly here, so every crossing
 		 * became a wall and the trunk was cut at each one. The predicate is
 		 * therefore "carries road traffic": normal road or a crossing. */
@@ -1538,7 +1540,7 @@ bool HsbBuildRoadTile(TileIndex t, RoadBits bits, bool dry_run = false)
 	};
 	if (build()) return true;
 
-	if (GetTileType(t) == MP_WATER) {
+	if (GetTileType(t) == TileType::Water) {
 		if (!HsbSpanWater(t, axis)) return false;
 		if (build()) return true;
 	}
@@ -1550,9 +1552,9 @@ bool HsbBuildRoadTile(TileIndex t, RoadBits bits, bool dry_run = false)
 		 * is what makes the road go through rather than around. Also without Auto:
 		 * levelling under a house or industry is the same silent demolition as
 		 * bulldozing it. */
-		CommandCost lev = std::get<0>(Command<CMD_LEVEL_LAND>::Do(kExec, t, t, false, LM_LEVEL));
+		CommandCost lev = std::get<0>(Command<Commands::TerraformLand>::Do(kExec, t, ComplementSlope(GetTileSlope(t)), true));
 		if (lev.Succeeded() && build()) return true;
-		CommandCost tun = Command<CMD_BUILD_TUNNEL>::Do(kStruct, t, TRANSPORT_ROAD, HsbRoadType());
+		CommandCost tun = Command<Commands::BuildTunnel>::Do(kStruct, t, TransportType::Road, INVALID_RAILTYPE, HsbRoadType());
 		if (tun.Succeeded() && build()) return true;
 		HsbNoteRoadFailure(tun, "tunnel", t);
 	}
@@ -1575,7 +1577,7 @@ bool HsbBuildRoadLeg(TileIndex from, TileIndex to, Axis axis, bool dry_run = fal
 	if (from == to) return true;
 	if (TileX(from) != TileX(to) && TileY(from) != TileY(to)) return false;
 
-	const RoadBits bits = axis == AXIS_X ? ROAD_X : ROAD_Y;
+	const RoadBits bits = axis == Axis::X ? ROAD_X : ROAD_Y;
 	TileIndex t = from;
 	for (uint guard = 0; guard < Map::Size(); ++guard) {
 		if (!IsValidTile(t)) return false;
@@ -1628,8 +1630,8 @@ bool HsbBuildRoadLegOrShoulder(TileIndex from, TileIndex to, Axis axis)
 	if (HsbBuildRoadLeg(from, to, axis)) return true;
 
 	/* Perpendicular step: across the leg for an X leg, along it for a Y leg. */
-	const DiagDirection side_dir = (axis == AXIS_X) ? DIAGDIR_SW : DIAGDIR_NW;
-	const Axis cross = (axis == AXIS_X) ? AXIS_Y : AXIS_X;
+	const DiagDirection side_dir = (axis == Axis::X) ? DiagDirection::SW : DiagDirection::NW;
+	const Axis cross = (axis == Axis::X) ? Axis::Y : Axis::X;
 	for (const int off : {1, -1, 2, -2, 3, -3}) {
 		const TileIndexDiff offset = TileOffsByDiagDir(side_dir) * off;
 		const TileIndex a = from + offset;
@@ -1642,7 +1644,7 @@ bool HsbBuildRoadLegOrShoulder(TileIndex from, TileIndex to, Axis axis)
 		if (HsbBuildRoadLeg(a, b, axis) &&
 				HsbBuildRoadLeg(from, a, cross) &&
 				HsbBuildRoadLeg(b, to, cross)) {
-			Debug(misc, 0, "hsb: road leg ({},{})->({},{}) went {} lane(s) to the side",
+			Debug(Facility::Misc, Severity::Critical, "hsb: road leg ({},{})->({},{}) went {} lane(s) to the side",
 			      TileX(from), TileY(from), TileX(to), TileY(to), off);
 			return true;
 		}
@@ -1678,10 +1680,10 @@ void HsbOwnRoadLeg(TileIndex from, TileIndex to, Axis axis, TownID tid)
 		 *
 		 * The two together are exactly the tiles inside the town's claim. */
 		const bool in_claim = GetTownIndex(t) == tid;
-		if (in_claim && IsTileType(t, MP_ROAD) && !IsRoadDepot(t)) {
-			SetRoadOwner(t, RTT_ROAD, OWNER_TOWN);
+		if (in_claim && IsTileType(t, TileType::Road) && !IsRoadDepot(t)) {
+			SetRoadOwner(t, RoadTramType::Road, OWNER_TOWN);
 		} else if (in_claim && MayHaveRoad(t)) {
-			SetRoadOwner(t, RTT_ROAD, OWNER_TOWN);
+			SetRoadOwner(t, RoadTramType::Road, OWNER_TOWN);
 		} else if (IsNormalRoadTile(t)) {
 			/* Company road, but tagged with the town so the railway can plan a
 			 * crossing against it and the town knows the road serves it. */
@@ -1723,37 +1725,37 @@ bool HsbCarriesRoad(TileIndex t)
 {
 	if (!IsValidTile(t)) return false;
 	switch (GetTileType(t)) {
-		case MP_CLEAR:
-		case MP_TREES:
-		case MP_ROAD:
+		case TileType::Clear:
+		case TileType::Trees:
+		case TileType::Road:
 			return true;
-		case MP_WATER: {
+		case TileType::Water: {
 			/* Span-able if two buildable banks sit on one axis within reach. */
 			const auto is_bank = [](TileIndex c) {
 				if (!IsValidTile(c)) return false;
 				const TileType tt = GetTileType(c);
-				return tt == MP_CLEAR || tt == MP_TREES || IsNormalRoadTile(c);
+				return tt == TileType::Clear || tt == TileType::Trees || IsNormalRoadTile(c);
 			};
-			for (const Axis axis : {AXIS_X, AXIS_Y}) {
+			for (const Axis axis : {Axis::X, Axis::Y}) {
 				for (int reach = 1; reach <= 8; ++reach) {
 					for (const int side : {1, -1}) {
 						const int s1 = side * reach, s2 = side * (reach + 1);
-						TileIndex a = HsbTileClamped(TileX(t) + (axis == AXIS_X ? s1 : 0),
-						                              TileY(t) + (axis == AXIS_X ? 0 : s1));
-						TileIndex b = HsbTileClamped(TileX(t) + (axis == AXIS_X ? s2 : 0),
-						                              TileY(t) + (axis == AXIS_X ? 0 : s2));
+						TileIndex a = HsbTileClamped(TileX(t) + (axis == Axis::X ? s1 : 0),
+						                              TileY(t) + (axis == Axis::X ? 0 : s1));
+						TileIndex b = HsbTileClamped(TileX(t) + (axis == Axis::X ? s2 : 0),
+						                              TileY(t) + (axis == Axis::X ? 0 : s2));
 						if (is_bank(a) && is_bank(b)) return true;
 					}
 				}
 			}
 			return false;
 		}
-		case MP_TUNNELBRIDGE:
+		case TileType::TunnelBridge:
 			/* Only a road bridge carries the road. Where the rail network already
 			 * bridged the river the tile is a rail bridge, and the road command
 			 * answers "must demolish bridge first" - so treat it as the wall it is
 			 * and route round. */
-			return GetTunnelBridgeTransportType(t) == TRANSPORT_ROAD;
+			return GetTunnelBridgeTransportType(t) == TransportType::Road;
 		default:
 			return false;
 	}
@@ -1829,7 +1831,7 @@ bool HsbPlanAndBuildRoad(TileIndex from, TileIndex to, TownID tid)
 			 * the reason HsbOwnRoadLeg gives. */
 			for (TileIndex t : path) {
 				if (tid == TownID::Invalid()) break;
-				if (IsNormalRoadTile(t) && GetTownIndex(t) == tid) SetRoadOwner(t, RTT_ROAD, OWNER_TOWN);
+				if (IsNormalRoadTile(t) && GetTownIndex(t) == tid) SetRoadOwner(t, RoadTramType::Road, OWNER_TOWN);
 			}
 			return true;
 		}
@@ -1886,14 +1888,14 @@ bool HsbWalkRoad(TileIndex from, TileIndex to)
 				TileIndex cand = along == 0 ? HsbTileClamped(static_cast<int>(TileX(cur)) + d, TileY(cur))
 				                            : HsbTileClamped(TileX(cur), static_cast<int>(TileY(cur)) + d);
 				if (!HsbDetourAllowed(HsbManhattanTiles(cur, to), HsbManhattanTiles(cand, to), 64)) continue;
-				if (GetTileType(cand) != MP_CLEAR && !IsWaterTile(cand) && !IsTileType(cand, MP_TREES)) continue;
+				if (GetTileType(cand) != TileType::Clear && !IsWaterTile(cand) && !IsTileType(cand, TileType::Trees)) continue;
 				if (try_step(cand)) { cur = cand; moved = true; break; }
 			}
 			if (moved) break;
 		}
 		if (!moved) {
 			if (HsbRoadTraceLeft() > 0) {
-				Debug(misc, 0, "hsb:   walk boxed in at ({},{}) target ({},{}) distance {} type {} slope {}",
+				Debug(Facility::Misc, Severity::Critical, "hsb:   walk boxed in at ({},{}) target ({},{}) distance {} type {} slope {}",
 					TileX(cur), TileY(cur), TileX(to), TileY(to), HsbManhattanTiles(cur, to),
 					GetTileType(cur), GetTileSlope(cur));
 			}
@@ -1937,7 +1939,7 @@ bool HsbRoadConnected(TileIndex a, TileIndex b, uint max_radius)
 		const uint d = seen[cur];
 		if (cur == b) return true;
 		if (d >= radius) continue;
-		for (const DiagDirection dir : {DIAGDIR_SW, DIAGDIR_SE, DIAGDIR_NW, DIAGDIR_NE}) {
+		for (const DiagDirection dir : {DiagDirection::SW, DiagDirection::SE, DiagDirection::NW, DiagDirection::NE}) {
 			const TileIndex n = cur + TileOffsByDiagDir(dir);
 			if (seen.count(n) != 0 || !walkable(n)) continue;
 			seen[n] = d + 1;
@@ -2000,9 +2002,9 @@ TileIndex HsbSnapBuildable(TileIndex t, uint radius, bool *moved = nullptr)
 	auto buildable = [](TileIndex c) {
 		if (!IsValidTile(c)) return false;
 		switch (GetTileType(c)) {
-			case MP_CLEAR:
-			case MP_TREES:
-			case MP_ROAD:
+			case TileType::Clear:
+			case TileType::Trees:
+			case TileType::Road:
 				return true;
 			default:
 				return false;
@@ -2025,8 +2027,8 @@ uint HsbLegObstacles(TileIndex from, TileIndex to, Axis axis)
 	TileIndex t = from;
 	for (uint guard = 0; guard < Map::Size(); ++guard) {
 		if (!IsValidTile(t)) break;
-		cost += HsbObstacleCost(GetTileType(t) == MP_WATER, GetTileSlope(t) != SLOPE_FLAT,
-		                        GetTileType(t) == MP_INDUSTRY);
+		cost += HsbObstacleCost(GetTileType(t) == TileType::Water, GetTileSlope(t) != SLOPE_FLAT,
+		                        GetTileType(t) == TileType::Industry);
 		if (t == to) break;
 		t += TileOffsByDiagDir(dir);
 	}
@@ -2058,7 +2060,7 @@ bool HsbRouteRoad(TileIndex a, TileIndex b, TownID tid)
 
 	/* Already axis-aligned: one straight run, no corner. */
 	if (x0 == tx || y0 == ty) {
-		const Axis axis = y0 == ty ? AXIS_X : AXIS_Y;
+		const Axis axis = y0 == ty ? Axis::X : Axis::Y;
 		if (HsbBuildRoadLegOrShoulder(a, b, axis)) {
 			HsbOwnRoadLeg(a, b, axis, tid);
 			return true;
@@ -2073,9 +2075,9 @@ bool HsbRouteRoad(TileIndex a, TileIndex b, TownID tid)
 	 * ground, along the axis the second leg runs on. */
 	const auto buildable_at = [&](int x, int y) {
 		switch (GetTileType(HsbTileClamped(x, y))) {
-			case MP_CLEAR:
-			case MP_TREES:
-			case MP_ROAD:
+			case TileType::Clear:
+			case TileType::Trees:
+			case TileType::Road:
 				return true;
 			default:
 				return false;
@@ -2106,8 +2108,8 @@ bool HsbRouteRoad(TileIndex a, TileIndex b, TownID tid)
 			cands.push_back({
 				HsbTileClamped(corner.via_x, corner.via_y),
 				HsbTileClamped(corner.end_x, corner.end_y),
-				corner.first == HsbLegAxis::x ? AXIS_X : AXIS_Y,
-				corner.second == HsbLegAxis::x ? AXIS_X : AXIS_Y,
+				corner.first == HsbLegAxis::x ? Axis::X : Axis::Y,
+				corner.second == HsbLegAxis::x ? Axis::X : Axis::Y,
 				0});
 		}
 		for (auto &c : cands) {
@@ -2127,14 +2129,14 @@ bool HsbRouteRoad(TileIndex a, TileIndex b, TownID tid)
 		}
 		if (!ok) {
 			if (HsbRoadTraceLeft() > 0) {
-				Debug(misc, 0, "hsb: trace link ({},{})->({},{}) chunk here=({},{}) cost range {}-{}",
+				Debug(Facility::Misc, Severity::Critical, "hsb: trace link ({},{})->({},{}) chunk here=({},{}) cost range {}-{}",
 					TileX(a), TileY(a), TileX(b), TileY(b), TileX(here), TileY(here),
 					cands.empty() ? 0u : cands.front().cost, cands.empty() ? 0u : cands.back().cost);
 				for (int d = -3; d <= 3; ++d) {
 					const TileIndex probe = HsbTileClamped(TileX(here) + d, TileY(here));
-					Debug(misc, 0, "hsb:   row tile ({},{}) type {} slope {} roadbits {}",
+					Debug(Facility::Misc, Severity::Critical, "hsb:   row tile ({},{}) type {} slope {} roadbits {}",
 						TileX(probe), TileY(probe), GetTileType(probe), GetTileSlope(probe),
-						IsNormalRoadTile(probe) ? static_cast<int>(GetRoadBits(probe, RTT_ROAD)) : -1);
+						IsNormalRoadTile(probe) ? static_cast<int>(GetRoadBits(probe, RoadTramType::Road).base()) : -1);
 				}
 				--HsbRoadTraceLeft();
 			}
@@ -2158,7 +2160,7 @@ bool HsbRouteRoad(TileIndex a, TileIndex b, TownID tid)
 	 * The radius is the whole segment's length plus a margin, because a chunk that
 	 * silently failed leaves the two ends up to that far apart. */
 	if (!HsbRoadConnected(a, b, static_cast<uint>(HsbManhattanTiles(a, b)) + 8)) {
-		Debug(misc, 0, "hsb: route ({},{})->({},{}) reported success but the two ends are not joined by road",
+		Debug(Facility::Misc, Severity::Critical, "hsb: route ({},{})->({},{}) reported success but the two ends are not joined by road",
 			TileX(a), TileY(a), TileX(b), TileY(b));
 		return false;
 	}
@@ -2186,10 +2188,10 @@ void HsbJoinTownsToTrunk()
 	/* Town streets are OWNER_TOWN road; the network the builder lays is the
 	 * company. That difference is the whole test. */
 	const auto is_town_road = [](TileIndex t) {
-		return IsValidTile(t) && IsNormalRoadTile(t) && GetRoadOwner(t, RTT_ROAD) == OWNER_TOWN;
+		return IsValidTile(t) && IsNormalRoadTile(t) && GetRoadOwner(t, RoadTramType::Road) == OWNER_TOWN;
 	};
 	const auto is_other_road = [](TileIndex t) {
-		return IsValidTile(t) && IsNormalRoadTile(t) && GetRoadOwner(t, RTT_ROAD) != OWNER_TOWN;
+		return IsValidTile(t) && IsNormalRoadTile(t) && GetRoadOwner(t, RoadTramType::Road) != OWNER_TOWN;
 	};
 
 	uint towns_joined = 0, towns_already = 0, towns_failed = 0, towns_nothing = 0;
@@ -2219,10 +2221,10 @@ void HsbJoinTownsToTrunk()
 			++towns_joined;
 		} else {
 			++towns_failed;
-			Debug(misc, 0, "hsb: could not join {} ({},{}) to the trunk road", town->name, TileX(town->xy), TileY(town->xy));
+			Debug(Facility::Misc, Severity::Critical, "hsb: could not join {} ({},{}) to the trunk road", town->name, TileX(town->xy), TileY(town->xy));
 		}
 	}
-	Debug(misc, 0, "hsb: town-to-trunk joins: {} newly routed, {} already touching, {} refused, {} with no road nearby",
+	Debug(Facility::Misc, Severity::Critical, "hsb: town-to-trunk joins: {} newly routed, {} already touching, {} refused, {} with no road nearby",
 	      towns_joined, towns_already, towns_failed, towns_nothing);
 }
 
@@ -2287,7 +2289,7 @@ void HsbJoinRoadFragments()
 	uint32_t largest_id = 0;
 	uint components = label_components(label, largest, largest_id);
 	const uint components_before = components;
-	Debug(misc, 0, "hsb: road components before stitching: {} (largest {} tiles)", components_before, largest);
+	Debug(Facility::Misc, Severity::Critical, "hsb: road components before stitching: {} (largest {} tiles)", components_before, largest);
 	if (components <= 1) return;
 
 	uint joins = 0, lies = 0, rounds = 0;
@@ -2357,7 +2359,7 @@ void HsbJoinRoadFragments()
 			if (!routed) { ++refused; continue; }
 			if (components >= before) {
 				++lies;
-				Debug(misc, 0, "hsb: stitch at ({},{})-({},{}) reported success but the pieces are still separate",
+				Debug(Facility::Misc, Severity::Critical, "hsb: stitch at ({},{})-({},{}) reported success but the pieces are still separate",
 				      TileX(mine), TileY(mine), TileX(foreign), TileY(foreign));
 				continue;
 			}
@@ -2365,13 +2367,13 @@ void HsbJoinRoadFragments()
 			break;
 		}
 		if (!merged) {
-			Debug(misc, 0, "hsb: stitching gave up: {} of {} candidates refused", refused, candidates.size());
+			Debug(Facility::Misc, Severity::Critical, "hsb: stitching gave up: {} of {} candidates refused", refused, candidates.size());
 			break;
 		}
 		++joins;
 		if (components <= 1) break;
 	}
-	Debug(misc, 0, "hsb: road fragments stitched: {} joins over {} rounds ({} routes reported success but merged nothing), "
+	Debug(Facility::Misc, Severity::Critical, "hsb: road fragments stitched: {} joins over {} rounds ({} routes reported success but merged nothing), "
 		"{} -> {} components, largest {} tiles",
 		joins, rounds, lies, components_before, components, largest);
 }
@@ -2438,7 +2440,7 @@ uint HsbPruneDeadEnds()
 		/* Remove from the far end back, so each removal sees a free end. */
 		for (auto it = branch.rbegin(); it != branch.rend(); ++it) {
 			if (!IsNormalRoadTile(*it)) continue;
-			if (Command<CMD_BUILD_ROAD>::Do(kExec, *it, ROAD_NONE, HsbRoadType(), DRD_NONE, TownID::Invalid()).Succeeded()) {
+			if (Command<Commands::BuildRoad>::Do(kExec, *it, RoadBits{}, HsbRoadType(), DisallowedRoadDirections{}, TownID::Invalid()).Succeeded()) {
 				++pruned;
 			}
 		}
@@ -2470,7 +2472,7 @@ bool HsbSpanWaterRail(TileIndex t, TileIndex next)
 	TileIndex lo{}, hi{};
 	if (!HsbWaterSpannable(t, dx, dy, &lo, &hi)) return false;
 	if (!HsbBridgeSpanIsClear(lo, hi, dx, dy)) return false;
-	return Command<CMD_BUILD_BRIDGE>::Do(kStruct, lo, hi, TRANSPORT_RAIL, 0, HsbRailType()).Succeeded();
+	return Command<Commands::BuildBridge>::Do(kStruct, lo, hi, TransportType::Rail, 0, HsbRailType(), INVALID_ROADTYPE).Succeeded();
 }
 
 /** Build rails on one tile, doing what it takes. */
@@ -2483,18 +2485,18 @@ bool HsbBuildRailTile(TileIndex t, Track along, Track across, TileIndex next = I
 	 * something". */
 	constexpr DoCommandFlags kExec{DoCommandFlag::Execute, DoCommandFlag::Auto, DoCommandFlag::NoWater};
 	constexpr DoCommandFlags kStruct{DoCommandFlag::Execute, DoCommandFlag::Auto};
-	const Axis axis = (along == TRACK_X) ? AXIS_X : AXIS_Y;
+	const Axis axis = (along == Track::X) ? Axis::X : Axis::Y;
 
 	/* Checked before anything else, not inside build(), because the levelling and
 	 * tunnelling attempts below run first and carry Auto too. */
-	if (IsTileType(t, MP_INDUSTRY)) {
+	if (IsTileType(t, TileType::Industry)) {
 		HsbNoteRailFailure(CommandCost(STR_ERROR_OBJECT_IN_THE_WAY), t, "industry in the way");
 		return false;
 	}
 
 	auto build = [&]() {
 		const bool was_rail = IsPlainRailTile(t);
-		CommandCost res = Command<CMD_BUILD_RAILROAD_TRACK>::Do(kExec, t, t, HsbRailType(), along, true, false);
+		CommandCost res = Command<Commands::BuildRailLong>::Do(kExec, t, t, HsbRailType(), along, true, false);
 		/* As on the road side: "already built" covers a bridge or a crossing, so the
 		 * tile is checked instead of the reply believed. */
 		if (res.Succeeded()) {
@@ -2514,18 +2516,18 @@ bool HsbBuildRailTile(TileIndex t, Track along, Track across, TileIndex next = I
 
 	if (build()) return true;
 	/* A junction needs both tracks, which is what lets a train change line. */
-	if (across != TRACK_BEGIN && IsPlainRailTile(t)) {
-		Command<CMD_BUILD_RAILROAD_TRACK>::Do(kExec, t, t, HsbRailType(), across, true, false);
+	if (across != Track::Begin && IsPlainRailTile(t)) {
+		Command<Commands::BuildRailLong>::Do(kExec, t, t, HsbRailType(), across, true, false);
 		if (build()) return true;
 	}
-	if (GetTileType(t) == MP_WATER) {
+	if (GetTileType(t) == TileType::Water) {
 		if (next != INVALID_TILE) {
 			if (HsbSpanWaterRail(t, next) && build()) return true;
 		} else {
 			/* Direction unknown: try both ways along the track axis. */
 			for (const int side : {1, -1}) {
-				if (HsbSpanWaterRail(t, TileXY(TileX(t) + (axis == AXIS_X ? side : 0),
-				                              TileY(t) + (axis == AXIS_X ? 0 : side))) && build()) return true;
+				if (HsbSpanWaterRail(t, TileXY(TileX(t) + (axis == Axis::X ? side : 0),
+				                              TileY(t) + (axis == Axis::X ? 0 : side))) && build()) return true;
 			}
 		}
 		return false;
@@ -2535,9 +2537,9 @@ bool HsbBuildRailTile(TileIndex t, Track along, Track across, TileIndex next = I
 	 * is what we are here to lay. No Auto on the levelling either - it would take a
 	 * building down with the hill. */
 	if (GetTileSlope(t) != SLOPE_FLAT && !IsPlainRailTile(t)) {
-		CommandCost lev = std::get<0>(Command<CMD_LEVEL_LAND>::Do(kExec, t, t, false, LM_LEVEL));
+		CommandCost lev = std::get<0>(Command<Commands::TerraformLand>::Do(kExec, t, ComplementSlope(GetTileSlope(t)), true));
 		if (lev.Succeeded() && build()) return true;
-		CommandCost tun = Command<CMD_BUILD_TUNNEL>::Do(kStruct, t, TRANSPORT_RAIL, HsbRailType());
+		CommandCost tun = Command<Commands::BuildTunnel>::Do(kStruct, t, TransportType::Rail, HsbRailType(), INVALID_ROADTYPE);
 		if (tun.Succeeded() && build()) return true;
 		if (tun.Failed()) HsbNoteRailFailure(tun, t, "tunnel");
 	}
@@ -2549,14 +2551,14 @@ bool HsbBuildRailLeg(TileIndex from, TileIndex to, Axis axis)
 {
 	if (from == to) return true;
 	if (TileX(from) != TileX(to) && TileY(from) != TileY(to)) return false;
-	const Track along = axis == AXIS_X ? TRACK_X : TRACK_Y;
-	const Track across = axis == AXIS_X ? TRACK_Y : TRACK_X;
+	const Track along = axis == Axis::X ? Track::X : Track::Y;
+	const Track across = axis == Axis::X ? Track::Y : Track::X;
 	TileIndex t = from;
 	for (uint guard = 0; guard < Map::Size(); ++guard) {
 		if (!IsValidTile(t)) return false;
 		/* The two end tiles take the crossing tracks, so a line can turn. */
 		const bool endpoint = (t == from || t == to);
-		if (!HsbBuildRailTile(t, along, endpoint ? across : TRACK_BEGIN)) return false;
+		if (!HsbBuildRailTile(t, along, endpoint ? across : Track::Begin)) return false;
 		if (t == to) break;
 		t += TileOffsByDiagDir(AxisToDiagDir(axis));
 	}
@@ -2568,11 +2570,11 @@ bool HsbCarriesRail(TileIndex t)
 {
 	if (!IsValidTile(t)) return false;
 	switch (GetTileType(t)) {
-		case MP_CLEAR:
-		case MP_TREES:
-		case MP_RAILWAY:
+		case TileType::Clear:
+		case TileType::Trees:
+		case TileType::Railway:
 			return true;
-		case MP_ROAD:
+		case TileType::Road:
 			/* A level crossing is what a railway does at a road, and the engine builds
 			 * one when the settings allow it - and they are pinned on above, so the
 			 * model may say yes.
@@ -2585,7 +2587,7 @@ bool HsbCarriesRail(TileIndex t)
 			 * re-plan around. The rail_component count in the audit is what says what
 			 * the network cost; the refusal tally names the reason. */
 			return true;
-		case MP_WATER:
+		case TileType::Water:
 			/* Water is a wall for the search, and that is the same lesson the road
 			 * planner taught - measured twice on the rail, the second time with a
 			 * *correct* bridge test: letting the search cross water where a bridge
@@ -2594,12 +2596,12 @@ bool HsbCarriesRail(TileIndex t)
 			 * walks the whole path before failing. The straight pieces cross, with
 			 * one bridge command per river. */
 			return false;
-		case MP_TUNNELBRIDGE:
+		case TileType::TunnelBridge:
 			/* Only a rail bridge carries the rail. Where the road network already
 			 * bridged the river, the tile is a road bridge and the rail command
 			 * answers "must demolish bridge first" - so treat it as the wall it is
 			 * and route round. */
-			return GetTunnelBridgeTransportType(t) == TRANSPORT_RAIL;
+			return GetTunnelBridgeTransportType(t) == TransportType::Rail;
 		default:
 			/* A house, an industry or a station: no track, ever. */
 			return false;
@@ -2613,8 +2615,8 @@ bool HsbWalkRail(TileIndex from, TileIndex to)
 	auto try_step = [&](TileIndex next) -> bool {
 		if (next == cur || !IsValidTile(next)) return false;
 		const bool horiz = TileY(next) == TileY(cur);
-		const Track along = horiz ? TRACK_X : TRACK_Y;
-		const Track across = horiz ? TRACK_Y : TRACK_X;
+		const Track along = horiz ? Track::X : Track::Y;
+		const Track across = horiz ? Track::Y : Track::X;
 		return HsbBuildRailTile(cur, along, across, next) && HsbBuildRailTile(next, along, across, next);
 	};
 	for (uint guard = 0; guard < 4096; ++guard) {
@@ -2636,7 +2638,7 @@ bool HsbWalkRail(TileIndex from, TileIndex to)
 				                            : HsbTileClamped(TileX(cur), static_cast<int>(TileY(cur)) + d);
 				if (!HsbDetourAllowed(HsbManhattanTiles(cur, to), HsbManhattanTiles(cand, to), 64)) continue;
 				const TileType tt = GetTileType(cand);
-				if (tt != MP_CLEAR && tt != MP_TREES && !IsWaterTile(cand)) continue;
+				if (tt != TileType::Clear && tt != TileType::Trees && !IsWaterTile(cand)) continue;
 				if (try_step(cand)) { cur = cand; moved = true; break; }
 			}
 			if (moved) break;
@@ -2691,7 +2693,7 @@ bool HsbPlanAndBuildRail(TileIndex from, TileIndex to)
 			const TileIndex t = path[i - 1];
 			const TileIndex next = i < path.size() ? path[i] : from;
 			const bool horiz = TileY(next) == TileY(t);
-			if (!HsbBuildRailTile(t, horiz ? TRACK_X : TRACK_Y, horiz ? TRACK_Y : TRACK_X, next)) {
+			if (!HsbBuildRailTile(t, horiz ? Track::X : Track::Y, horiz ? Track::Y : Track::X, next)) {
 				bad = t;
 				ok = false;
 			}
@@ -2726,7 +2728,7 @@ bool HsbRouteRail(TileIndex a, TileIndex b)
 
 	/* Already on one axis: a single straight run. */
 	if (TileX(a) == TileX(b) || TileY(a) == TileY(b)) {
-		return HsbBuildRailLeg(a, b, TileY(a) == TileY(b) ? AXIS_X : AXIS_Y) ? true : give_up();
+		return HsbBuildRailLeg(a, b, TileY(a) == TileY(b) ? Axis::X : Axis::Y) ? true : give_up();
 	}
 
 	int x = static_cast<int>(TileX(a));
@@ -2748,8 +2750,8 @@ bool HsbRouteRail(TileIndex a, TileIndex b)
 		for (const bool x_first : {true, false}) {
 			const TileIndex via = x_first ? HsbTileClamped(nx, y) : HsbTileClamped(x, ny);
 			const size_t piece = g_hsb_rail_new_tiles.size();
-			if (HsbBuildRailLeg(here, via, x_first ? AXIS_X : AXIS_Y) &&
-			    HsbBuildRailLeg(via, end, x_first ? AXIS_Y : AXIS_X)) {
+			if (HsbBuildRailLeg(here, via, x_first ? Axis::X : Axis::Y) &&
+			    HsbBuildRailLeg(via, end, x_first ? Axis::Y : Axis::X)) {
 				done = true;
 				break;
 			}
@@ -2758,7 +2760,8 @@ bool HsbRouteRail(TileIndex a, TileIndex b)
 			for (size_t i = g_hsb_rail_new_tiles.size(); i > piece; --i) {
 				const TileIndex t = g_hsb_rail_new_tiles[i - 1];
 				if (IsValidTile(t) && IsPlainRailTile(t)) {
-					Command<CMD_REMOVE_RAILROAD_TRACK>::Do(kExec, t, t, TRACK_BEGIN);
+					Command<Commands::RemoveRail>::Do(kExec, t, Track::X);
+					Command<Commands::RemoveRail>::Do(kExec, t, Track::Y);
 				}
 			}
 			if (g_hsb_rail_new_tiles.size() > piece) g_hsb_rail_new_tiles.resize(piece);
@@ -2810,11 +2813,11 @@ void HsbDemolishDepot(TileIndex site)
 {
 	for (TileIndex t : TileArea(site, 1, 1)) {
 		if (!IsValidTile(t)) continue;
-		if (GetTileType(t) == MP_STATION) continue;   // never a station
+		if (GetTileType(t) == TileType::Station) continue;   // never a station
 		const bool ours = IsRailDepotTile(t) || IsRoadDepotTile(t) || IsShipDepotTile(t) ||
 		                  IsPlainRailTile(t) || IsNormalRoadTile(t);
 		if (!ours) continue;
-		Command<CMD_LANDSCAPE_CLEAR>::Do(DoCommandFlags{DoCommandFlag::Execute, DoCommandFlag::NoWater, DoCommandFlag::AllTiles}, t);
+		Command<Commands::LandscapeClear>::Do(DoCommandFlags{DoCommandFlag::Execute, DoCommandFlag::NoWater, DoCommandFlag::AllTiles}, t);
 	}
 }
 
@@ -2841,7 +2844,7 @@ Order HsbServiceOrder(TileIndex site)
 		if (Depot::GetIfValid(GetDepotIndex(t)) != nullptr) { depot = t; break; }
 	}
 	if (depot == INVALID_TILE) {
-		Debug(misc, 0, "hsb: no depot tile found around ({},{}) for a service order", TileX(site), TileY(site));
+		Debug(Facility::Misc, Severity::Critical, "hsb: no depot tile found around ({},{}) for a service order", TileX(site), TileY(site));
 	}
 	Order order;
 	/* PartOfOrders *and* Service: this depot is a stop on the route, and the vehicle
@@ -2881,12 +2884,12 @@ std::vector<EngineID> HsbEngineCandidates(VehicleType type, bool passengers_only
 		if (e->type != type) continue;
 		if (!IsEngineBuildable(e->index, type, _current_company)) continue;
 		if (passengers_only && e->GetDefaultCargoType() != GetCargoTypeByLabel(CT_PASSENGERS)) continue;
-		if (type == VEH_TRAIN) {
+		if (type == VehicleType::Train) {
 			const RailVehicleInfo &rvi = e->VehInfo<RailVehicleInfo>();
 			/* A wagon cannot move on its own. A multihead engine can - it is two coupled
 			 * units, and the front one is the consist's primary, which is where orders
 			 * have to be set. */
-			if (rvi.railveh_type == RAILVEH_WAGON) continue;
+			if (rvi.railveh_type == RailVehicleType::Wagon) continue;
 			if (!IsCompatibleRail(rvi.railtypes, HsbRailType())) continue;
 			/* Same test the build command makes, against the network's rail type: an
 			 * engine that cannot draw power on plain rail is refused with a bare
@@ -2915,7 +2918,7 @@ VehicleID HsbBuyVehicle(TileIndex depot, const std::vector<EngineID> &candidates
 {
 	constexpr DoCommandFlags kExec{DoCommandFlag::Execute};
 	for (EngineID eid : candidates) {
-		const auto bought = Command<CMD_BUILD_VEHICLE>::Do(kExec, depot, eid, true, cargo, INVALID_CLIENT_ID);
+		const auto bought = Command<Commands::BuildVehicle>::Do(kExec, depot, eid, true, cargo, ClientID::Invalid);
 		const CommandCost &cost = std::get<0>(bought);
 		const VehicleID vid = std::get<1>(bought);
 		if (!cost.Succeeded() || vid == VehicleID::Invalid()) continue;
@@ -2926,12 +2929,12 @@ VehicleID HsbBuyVehicle(TileIndex depot, const std::vector<EngineID> &candidates
 		Vehicle *v = Vehicle::Get(vid);
 		while (v != nullptr && !v->IsPrimaryVehicle()) v = v->Previous();
 		if (v == nullptr) {
-			Debug(misc, 0, "hsb: vehicle {} is not part of a consist with a front", vid.base());
+			Debug(Facility::Misc, Severity::Critical, "hsb: vehicle {} is not part of a consist with a front", vid.base());
 			continue;
 		}
 		return v->index;
 	}
-	Debug(misc, 0, "hsb: no engine of {} candidate(s) fits the depot at ({},{}) (rail type {}, depot rail type {})",
+	Debug(Facility::Misc, Severity::Critical, "hsb: no engine of {} candidate(s) fits the depot at ({},{}) (rail type {}, depot rail type {})",
 		candidates.size(), TileX(depot), TileY(depot), static_cast<int>(HsbRailType()), static_cast<int>(GetRailType(depot)));
 	return VehicleID::Invalid();
 }
@@ -2939,7 +2942,7 @@ VehicleID HsbBuyVehicle(TileIndex depot, const std::vector<EngineID> &candidates
 /**
  * Take a vehicle out of its depot.
  *
- * CMD_BUILD_VEHICLE leaves the new consist parked with its brakes on, and giving it
+ * Commands::BuildVehicle leaves the new consist parked with its brakes on, and giving it
  * orders does not release it: a player has to press the start button, and the builder
  * never presses any buttons. The result is a scenario whose vehicles all have a
  * route, all pass a check for having orders, and none of them ever moves - which is
@@ -2951,10 +2954,10 @@ VehicleID HsbBuyVehicle(TileIndex depot, const std::vector<EngineID> &candidates
 bool HsbStartVehicle(VehicleID vid)
 {
 	constexpr DoCommandFlags kExec{DoCommandFlag::Execute};
-	const CommandCost &cost = Command<CMD_START_STOP_VEHICLE>::Do(kExec, vid, false);
+	const CommandCost &cost = Command<Commands::StartStopVehicle>::Do(kExec, vid, false);
 	if (!cost.Succeeded()) {
 		const StringID why = cost.GetErrorMessage();
-		Debug(misc, 0, "hsb: vehicle {} refused to leave the depot: {}",
+		Debug(Facility::Misc, Severity::Critical, "hsb: vehicle {} refused to leave the depot: {}",
 		      vid.base(), why == INVALID_STRING_ID ? "no reason given" : GetString(why));
 		return false;
 	}
@@ -2967,9 +2970,9 @@ bool HsbAddOrder(VehicleID vid, const Order &order)
 	constexpr DoCommandFlags kExec{DoCommandFlag::Execute};
 	Vehicle *v = Vehicle::Get(vid);
 	const VehicleOrderID at = v->GetNumManualOrders();
-	const CommandCost res = Command<CMD_INSERT_ORDER>::Do(kExec, vid, at, order);
+	const CommandCost res = Command<Commands::InsertOrder>::Do(kExec, vid, at, order);
 	if (res.Failed()) {
-		Debug(misc, 0, "hsb: order refused for vehicle {} (order type {}, primary {}, engine type {}, in depot {}): {}",
+		Debug(Facility::Misc, Severity::Critical, "hsb: order refused for vehicle {} (order type {}, primary {}, engine type {}, in depot {}): {}",
 			vid.base(), static_cast<int>(order.GetType()), v->IsPrimaryVehicle(),
 			static_cast<int>(v->type), v->IsInDepot(),
 			HsbWhy(res));
@@ -2993,9 +2996,9 @@ void HsbBuildBusService(HsbServiceCounts &counts, uint max_towns)
 {
 	constexpr DoCommandFlags kExec{DoCommandFlag::Execute};
 	uint not_started = 0;
-	const std::vector<EngineID> buses = HsbEngineCandidates(VEH_ROAD, true);
+	const std::vector<EngineID> buses = HsbEngineCandidates(VehicleType::Road, true);
 	if (buses.empty()) {
-		Debug(misc, 0, "hsb: no bus engine available to the network owner");
+		Debug(Facility::Misc, Severity::Critical, "hsb: no bus engine available to the network owner");
 		return;
 	}
 	/* Largest towns first: a bus in a hamlet nobody lives in is a bus standing
@@ -3019,20 +3022,20 @@ void HsbBuildBusService(HsbServiceCounts &counts, uint max_towns)
 		for (TileIndex road : SpiralTileSequence(town->xy, 8, 0, 0)) {
 			if (have_depot) break;
 			if (!IsValidTile(road) || !IsNormalRoadTile(road)) continue;
-			for (const DiagDirection dir : {DIAGDIR_SW, DIAGDIR_SE, DIAGDIR_NW, DIAGDIR_NE}) {
+			for (const DiagDirection dir : {DiagDirection::SW, DiagDirection::SE, DiagDirection::NW, DiagDirection::NE}) {
 				TileIndex site = TileIndex(road + TileOffsByDiagDir(dir));
 				if (!IsValidTile(site)) continue;
 				/* Clear, flat ground only: a depot built on an industry tile converts it
 				 * and the industry closes, silently and with a success return. A bus
 				 * depot is four tiles, so the whole footprint has to be clear, not just
 				 * the tile named. */
-				if (!IsTileType(site, MP_CLEAR) || GetTileSlope(site) != SLOPE_FLAT) continue;
+				if (!IsTileType(site, TileType::Clear) || GetTileSlope(site) != SLOPE_FLAT) continue;
 				for (TileIndex c : TileArea(site, 1, 1)) {
-					if (!IsValidTile(c) || !IsTileType(c, MP_CLEAR)) { site = INVALID_TILE; break; }
+					if (!IsValidTile(c) || !IsTileType(c, TileType::Clear)) { site = INVALID_TILE; break; }
 				}
 				if (site == INVALID_TILE) continue;
 				/* Exit back towards the road; the step direction has to be reversed. */
-				const CommandCost res = Command<CMD_BUILD_ROAD_DEPOT>::Do(kExec, site, HsbRoadType(), ReverseDiagDir(dir));
+				const CommandCost res = Command<Commands::BuildRoadDepot>::Do(kExec, site, HsbRoadType(), ReverseDiagDir(dir));
 				if (!res.Succeeded()) {
 					if (depot_why == INVALID_STRING_ID) depot_why = res.GetErrorMessage();
 					continue;
@@ -3065,9 +3068,9 @@ void HsbBuildBusService(HsbServiceCounts &counts, uint max_towns)
 			if (too_close) continue;
 			/* A drive-through stop faces along the road, so it needs the diagonal that
 			 * road runs in. */
-			const DiagDirection dir = DIAGDIR_SE;
-			const CommandCost res = Command<CMD_BUILD_ROAD_STOP>::Do(kExec, road, 1, 1, RoadStopType::Bus, true,
-				dir, HsbRoadType(), RoadStopClassID::ROADSTOP_CLASS_DFLT, 0, StationID::Invalid(), true);
+			const DiagDirection dir = DiagDirection::SE;
+			const CommandCost res = Command<Commands::BuildRoadStop>::Do(kExec, road, 1, 1, RoadStopType::Bus, true,
+				dir, HsbRoadType(), ROADSTOP_CLASS_DFLT, 0, StationID::Invalid(), true);
 			if (res.Succeeded()) { stops.push_back(road); ++counts.bus_stops; }
 			else if (stop_why == INVALID_STRING_ID) stop_why = res.GetErrorMessage();
 		}
@@ -3083,13 +3086,13 @@ void HsbBuildBusService(HsbServiceCounts &counts, uint max_towns)
 			&& HsbAddOrder(vid, HsbStopOrder(GetStationIndex(stops[1])))
 			&& HsbAddOrder(vid, HsbServiceOrder(depot));
 		if (!routed) {
-			Debug(misc, 0, "hsb: bus in {} has no working route - it would stand in the depot", depot);
+			Debug(Facility::Misc, Severity::Critical, "hsb: bus in {} has no working route - it would stand in the depot", depot);
 			--counts.buses;
 		} else if (!HsbStartVehicle(vid)) {
 			++not_started;
 		}
 	}
-	Debug(misc, 0, "hsb: bus service: {} depots ({} taken down again), {} stops, {} buses ({} refused to start; "
+	Debug(Facility::Misc, Severity::Critical, "hsb: bus service: {} depots ({} taken down again), {} stops, {} buses ({} refused to start; "
 		"first depot refusal: {}, first stop refusal: {})",
 		counts.bus_depots, counts.bus_depots_stranded, counts.bus_stops, counts.buses, not_started,
 		depot_why == INVALID_STRING_ID ? std::string("none") : GetString(depot_why),
@@ -3117,14 +3120,14 @@ void HsbBuildStationTrains(HsbServiceCounts &counts, uint wanted)
 {
 	const std::vector<EngineID> cargo_trains = [] {
 		std::vector<EngineID> out;
-		for (EngineID eid : HsbEngineCandidates(VEH_TRAIN)) {
+		for (EngineID eid : HsbEngineCandidates(VehicleType::Train)) {
 			const Engine *e = Engine::Get(eid);
 			if (e->CanCarryCargo() && e->GetDisplayDefaultCapacity() > 0) out.push_back(eid);
 		}
 		return out;
 	}();
 	if (cargo_trains.empty()) {
-		Debug(misc, 0, "hsb: no cargo-capable train engine available to the network owner");
+		Debug(Facility::Misc, Severity::Critical, "hsb: no cargo-capable train engine available to the network owner");
 		return;
 	}
 
@@ -3164,19 +3167,19 @@ void HsbBuildStationTrains(HsbServiceCounts &counts, uint wanted)
 				if (have_depot) break;
 				if (!IsValidTile(t) || !IsPlainRailTile(t)) continue;
 				if (GetTileSlope(t) != SLOPE_FLAT) continue;
-				for (const DiagDirection dir : {DIAGDIR_SW, DIAGDIR_SE, DIAGDIR_NW, DIAGDIR_NE}) {
+				for (const DiagDirection dir : {DiagDirection::SW, DiagDirection::SE, DiagDirection::NW, DiagDirection::NE}) {
 					const TileIndex site = TileIndex(t + TileOffsByDiagDir(dir));
 					if (!IsValidTile(site) || GetTileSlope(site) != SLOPE_FLAT) continue;
 					bool on_station = false;
 					for (TileIndex c : TileArea(site, 1, 1)) {
-						if (IsValidTile(c) && GetTileType(c) == MP_STATION) on_station = true;
+						if (IsValidTile(c) && GetTileType(c) == TileType::Station) on_station = true;
 					}
 					if (on_station) continue;
 					/* Same two rules as the freight phase: never on a tile that is not
 					 * clear ground, and the exit has to point back at the track, which is
 					 * the reverse of the step that found the site. */
-					if (!IsTileType(site, MP_CLEAR)) continue;
-					if (!Command<CMD_BUILD_TRAIN_DEPOT>::Do(DoCommandFlag::Execute, site, HsbRailType(), ReverseDiagDir(dir)).Succeeded()) continue;
+					if (!IsTileType(site, TileType::Clear)) continue;
+					if (!Command<Commands::BuildRailDepot>::Do(DoCommandFlag::Execute, site, HsbRailType(), ReverseDiagDir(dir)).Succeeded()) continue;
 					if (!HsbDepotIsConnected(site, true)) { HsbDemolishDepot(site); continue; }
 					depot = site;
 					have_depot = true;
@@ -3197,7 +3200,7 @@ void HsbBuildStationTrains(HsbServiceCounts &counts, uint wanted)
 		const bool routed = HsbAddOrder(train, HsbStopOrder(st->index))
 			&& HsbAddOrder(train, HsbServiceOrder(depot));
 		if (!routed) {
-			Debug(misc, 0, "hsb: train for the station at ({},{}) has no working route", TileX(st->xy), TileY(st->xy));
+			Debug(Facility::Misc, Severity::Critical, "hsb: train for the station at ({},{}) has no working route", TileX(st->xy), TileY(st->xy));
 			--built;
 		} else if (!HsbStartVehicle(train)) {
 			++not_started;
@@ -3208,7 +3211,7 @@ void HsbBuildStationTrains(HsbServiceCounts &counts, uint wanted)
 		++station_total;
 		if (st->facilities.Test(StationFacility::Train)) ++with_facility;
 	}
-	Debug(misc, 0, "hsb: station trains: {} trains with spur depots ({} stations had no track to build on, "
+	Debug(Facility::Misc, Severity::Critical, "hsb: station trains: {} trains with spur depots ({} stations had no track to build on, "
 		"{} had no room for a spur, {} refused to start); {} of {} stations carry the train facility",
 		built, no_track, no_spur, not_started, with_facility, station_total);
 	counts.trains = built;
@@ -3244,24 +3247,24 @@ void HsbDumpNetwork()
 	const auto classify = [](int x, int y) -> char {
 		const TileIndex t = TileXY(x, y);
 		if (!IsValidTile(t)) return ' ';
-		/* By tile type, most specific first. GetStationIndex() asserts MP_STATION and
+		/* By tile type, most specific first. GetStationIndex() asserts TileType::Station and
 		 * simply reads m2() otherwise, so asking it about an arbitrary tile answers
 		 * with garbage - it called every tile in the map a station - and GetTownIndex()
 		 * covers a town's whole claim. */
-		if (IsTileType(t, MP_STATION)) return 'S';
-		if (IsTileType(t, MP_INDUSTRY)) return 'I';
+		if (IsTileType(t, TileType::Station)) return 'S';
+		if (IsTileType(t, TileType::Industry)) return 'I';
 		if (IsBridgeAbove(t)) return '#';
-		if (IsTileType(t, MP_RAILWAY)) {
+		if (IsTileType(t, TileType::Railway)) {
 			if (IsRailDepotTile(t)) return 'D';
-			return HasTrack(t, TRACK_X) && HasTrack(t, TRACK_Y) ? 't' : 'T';
+			return HasTrack(t, Track::X) && HasTrack(t, Track::Y) ? 't' : 'T';
 		}
-		if (IsTileType(t, MP_ROAD)) {
+		if (IsTileType(t, TileType::Road)) {
 			if (IsRoadDepotTile(t)) return 'D';
 			if (IsLevelCrossing(t)) return 'r';
-			if (GetRoadOwner(t, RTT_ROAD) == OWNER_TOWN) return '^';
+			if (GetRoadOwner(t, RoadTramType::Road) == OWNER_TOWN) return '^';
 			return 'R';
 		}
-		if (IsTileType(t, MP_WATER)) return '~';
+		if (IsTileType(t, TileType::Water)) return '~';
 		if (GetTownIndex(t) != TownID::Invalid()) return ',';
 		return '.';
 	};
@@ -3270,7 +3273,7 @@ void HsbDumpNetwork()
 	const std::vector<std::string> rows = HsbDumpGrid(Map::SizeX(), Map::SizeY(), kStep, classify);
 	std::ofstream out(path);
 	if (!out) {
-		Debug(misc, 0, "hsb: cannot write the network dump to {}", path);
+		Debug(Facility::Misc, Severity::Critical, "hsb: cannot write the network dump to {}", path);
 		return;
 	}
 	out << fmt::format("# hsb network dump: {}x{} tiles, {} tile(s) per character, x east, y south\n",
@@ -3279,7 +3282,7 @@ void HsbDumpNetwork()
 		out << (row + 1) * kStep << '|' << rows[row] << '\n';
 	}
 	out.close();
-	Debug(misc, 0, "hsb: network dump written to {}", path);
+	Debug(Facility::Misc, Severity::Critical, "hsb: network dump written to {}", path);
 }
 
 /**
@@ -3325,12 +3328,12 @@ void HsbChooseStartView()
 		}
 	}
 	if (best == nullptr || best->tile == INVALID_TILE) {
-		Debug(misc, 0, "hsb: start view: no town to open on");
+		Debug(Facility::Misc, Severity::Critical, "hsb: start view: no town to open on");
 		_hsb_start_view_tile = INVALID_TILE;
 		return;
 	}
 	_hsb_start_view_tile = best->tile;
-	Debug(misc, 0, "hsb: start view: tile ({},{}) with {} station(s), population {}",
+	Debug(Facility::Misc, Severity::Critical, "hsb: start view: tile ({},{}) with {} station(s), population {}",
 	      TileX(best->tile), TileY(best->tile), best->stations, best->population);
 }
 
@@ -3346,43 +3349,43 @@ bool HsbReadCorridors(const std::string &path, const char *label, std::vector<st
 {
 	std::ifstream file(path);
 	if (!file) {
-		Debug(misc, 0, "hsb: cannot open {} {}", label, path);
+		Debug(Facility::Misc, Severity::Critical, "hsb: cannot open {} {}", label, path);
 		return false;
 	}
 	nlohmann::json json;
 	try {
 		file >> json;
 	} catch (nlohmann::json::exception &e) {
-		Debug(misc, 0, "hsb: {} parse error: {}", label, e.what());
+		Debug(Facility::Misc, Severity::Critical, "hsb: {} parse error: {}", label, e.what());
 		return false;
 	}
 	if (!json.is_array()) {
-		Debug(misc, 0, "hsb: {} root must be an array", label);
+		Debug(Facility::Misc, Severity::Critical, "hsb: {} root must be an array", label);
 		return false;
 	}
 	for (const auto &corr : json) {
 		std::string name = "<unnamed>";
 		if (corr.contains("name")) {
 			if (!corr.at("name").is_string()) {
-				Debug(misc, 0, "hsb: {} corridor name must be a string", label);
+				Debug(Facility::Misc, Severity::Critical, "hsb: {} corridor name must be a string", label);
 				return false;
 			}
 			name = corr.at("name").get<std::string>();
 		}
 		if (!corr.contains("waypoints") || !corr.at("waypoints").is_array() || corr.at("waypoints").size() < 2) {
-			Debug(misc, 0, "hsb: {} corridor '{}' needs a waypoints array of at least two [lat,lon] pairs", label, name);
+			Debug(Facility::Misc, Severity::Critical, "hsb: {} corridor '{}' needs a waypoints array of at least two [lat,lon] pairs", label, name);
 			return false;
 		}
 		std::vector<std::pair<double, double>> wps;
 		for (const auto &wp : corr.at("waypoints")) {
 			if (!wp.is_array() || wp.size() != 2 || !wp.at(0).is_number() || !wp.at(1).is_number()) {
-				Debug(misc, 0, "hsb: {} corridor '{}' waypoints must be numeric [lat, lon] pairs", label, name);
+				Debug(Facility::Misc, Severity::Critical, "hsb: {} corridor '{}' waypoints must be numeric [lat, lon] pairs", label, name);
 				return false;
 			}
 			const double lat = wp.at(0).get<double>();
 			const double lon = wp.at(1).get<double>();
 			if (!HsbCoordinateInBounds(g_hsb_bounds, lat, lon)) {
-				Debug(misc, 0, "hsb: {} corridor '{}' waypoint ({},{}) is outside the manifest bounds", label, name, lat, lon);
+				Debug(Facility::Misc, Severity::Critical, "hsb: {} corridor '{}' waypoint ({},{}) is outside the manifest bounds", label, name, lat, lon);
 				return false;
 			}
 			wps.emplace_back(lat, lon);
@@ -3398,38 +3401,38 @@ bool HsbReadPlaces(const std::string &path, const char *label,
 {
 	std::ifstream file(path);
 	if (!file) {
-		Debug(misc, 0, "hsb: cannot open {} {}", label, path);
+		Debug(Facility::Misc, Severity::Critical, "hsb: cannot open {} {}", label, path);
 		return false;
 	}
 	nlohmann::json json;
 	try {
 		file >> json;
 	} catch (nlohmann::json::exception &e) {
-		Debug(misc, 0, "hsb: {} parse error: {}", label, e.what());
+		Debug(Facility::Misc, Severity::Critical, "hsb: {} parse error: {}", label, e.what());
 		return false;
 	}
 	if (!json.is_array()) {
-		Debug(misc, 0, "hsb: {} root must be an array", label);
+		Debug(Facility::Misc, Severity::Critical, "hsb: {} root must be an array", label);
 		return false;
 	}
 	for (const auto &entry : json) {
 		std::string name = "<unnamed>";
 		if (entry.contains("name")) {
 			if (!entry.at("name").is_string()) {
-				Debug(misc, 0, "hsb: {} entry name must be a string", label);
+				Debug(Facility::Misc, Severity::Critical, "hsb: {} entry name must be a string", label);
 				return false;
 			}
 			name = entry.at("name").get<std::string>();
 		}
 		if (!entry.contains("xy") || !entry.at("xy").is_array() || entry.at("xy").size() != 2
 				|| !entry.at("xy").at(0).is_number() || !entry.at("xy").at(1).is_number()) {
-			Debug(misc, 0, "hsb: {} entry '{}' needs xy: [lat, lon] numbers", label, name);
+			Debug(Facility::Misc, Severity::Critical, "hsb: {} entry '{}' needs xy: [lat, lon] numbers", label, name);
 			return false;
 		}
 		const double lat = entry.at("xy").at(0).get<double>();
 		const double lon = entry.at("xy").at(1).get<double>();
 		if (!HsbCoordinateInBounds(g_hsb_bounds, lat, lon)) {
-			Debug(misc, 0, "hsb: {} entry '{}' at ({},{}) is outside the manifest bounds", label, name, lat, lon);
+			Debug(Facility::Misc, Severity::Critical, "hsb: {} entry '{}' at ({},{}) is outside the manifest bounds", label, name, lat, lon);
 			return false;
 		}
 		out.emplace_back(name, std::make_pair(lat, lon));
@@ -3455,11 +3458,11 @@ uint HsbRouteCorridors(const std::vector<std::vector<std::pair<double, double>>>
 			const TileIndex cur = HsbSnapBuildable(want, static_cast<uint>(kHsbEndpointSnap.fallback), &moved);
 			if (moved) {
 				++snapped;
-			} else if (!IsValidTile(cur) || GetTileType(cur) == MP_VOID || GetTileType(cur) == MP_WATER) {
+			} else if (!IsValidTile(cur) || GetTileType(cur) == TileType::Void || GetTileType(cur) == TileType::Water) {
 				/* Nowhere to stand: every link to this point will fail, and it would look
 				 * like a routing problem rather than an endpoint one. */
 				++unsnappable;
-				Debug(misc, 0, "hsb: no buildable ground within {} tiles of ({},{}) for a corridor endpoint, type {}",
+				Debug(Facility::Misc, Severity::Critical, "hsb: no buildable ground within {} tiles of ({},{}) for a corridor endpoint, type {}",
 					kHsbEndpointSnap.fallback, TileX(want), TileY(want), GetTileType(cur));
 			}
 			if (!IsValidTile(cur)) { have_prev = false; continue; }
@@ -3502,7 +3505,7 @@ uint HsbRetryRoadLinks(std::vector<std::pair<TileIndex, TileIndex>> &links)
 				still.push_back(link);
 			}
 		}
-		Debug(misc, 0, "hsb: retry pass {}: {} links routed, {} still unrouted", pass, got, still.size());
+		Debug(Facility::Misc, Severity::Critical, "hsb: retry pass {}: {} links routed, {} still unrouted", pass, got, still.size());
 		if (got == 0) break;
 		links.swap(still);
 	}
@@ -3513,7 +3516,7 @@ uint HsbRetryRoadLinks(std::vector<std::pair<TileIndex, TileIndex>> &links)
  * A spur from the nearest existing road to the edge of every land industry.
  *
  * Target a buildable tile next to the industry, not the industry tile itself:
- * CMD_BUILD_ROAD refuses anything but bare land.
+ * Commands::BuildRoad refuses anything but bare land.
  */
 void HsbBuildIndustrySpurs(uint &spur_ok, uint &spur_missed)
 {
@@ -3526,8 +3529,8 @@ void HsbBuildIndustrySpurs(uint &spur_ok, uint &spur_missed)
 		TileIndex target{};
 		bool found = false;
 		for (TileIndex t : SpiralTileSequence(ind->location.tile, 6, 0, 0)) {
-			if (!IsValidTile(t) || IsTileType(t, MP_TUNNELBRIDGE)) continue;
-			if (GetTileType(t) != MP_CLEAR || GetTileSlope(t) != SLOPE_FLAT) continue;
+			if (!IsValidTile(t) || IsTileType(t, TileType::TunnelBridge)) continue;
+			if (GetTileType(t) != TileType::Clear || GetTileSlope(t) != SLOPE_FLAT) continue;
 			target = t;
 			found = true;
 			break;
@@ -3550,7 +3553,7 @@ void HsbBuildIndustrySpurs(uint &spur_ok, uint &spur_missed)
 		if (HsbRouteRoad(from, target, tid)) {
 			++spur_ok;
 		} else {
-			Debug(misc, 0, "hsb: industry spur failed near '{}' at tile ({},{})",
+			Debug(Facility::Misc, Severity::Critical, "hsb: industry spur failed near '{}' at tile ({},{})",
 				name, TileX(target), TileY(target));
 			++spur_missed;
 		}
@@ -3576,7 +3579,7 @@ uint HsbBuildFreightSidings(uint &depots, uint &stranded)
 		bool have_target = false;
 		for (TileIndex t : SpiralTileSequence(ind->location.tile, 6, 0, 0)) {
 			if (!IsValidTile(t)) continue;
-			if (GetTileType(t) != MP_CLEAR || GetTileSlope(t) != SLOPE_FLAT) continue;
+			if (GetTileType(t) != TileType::Clear || GetTileSlope(t) != SLOPE_FLAT) continue;
 			target = t;
 			have_target = true;
 			break;
@@ -3601,22 +3604,22 @@ uint HsbBuildFreightSidings(uint &depots, uint &stranded)
 		for (TileIndex t : SpiralTileSequence(target, 8, 0, 0)) {
 			if (placed) break;
 			if (!IsValidTile(t) || !IsPlainRailTile(t)) continue;
-			for (const DiagDirection dir : {DIAGDIR_SW, DIAGDIR_SE, DIAGDIR_NW, DIAGDIR_NE}) {
+			for (const DiagDirection dir : {DiagDirection::SW, DiagDirection::SE, DiagDirection::NW, DiagDirection::NE}) {
 				const TileIndex site = TileIndex(t + TileOffsByDiagDir(dir));
 				if (!IsValidTile(site)) continue;
 				/* Clear, flat ground only, and this is load-bearing rather than fussy. A
 				 * train depot is a single tile and the engine builds it by calling
-				 * SetTileType() on it directly; CMD_LANDSCAPE_CLEAR, which runs first,
+				 * SetTileType() on it directly; Commands::LandscapeClear, which runs first,
 				 * does not refuse an industry. A depot sited on an industry tile
 				 * therefore converts that tile and orphans the industry, which then
 				 * closes - and the depot command reports success throughout. */
-				if (!IsTileType(site, MP_CLEAR) || GetTileSlope(site) != SLOPE_FLAT) continue;
+				if (!IsTileType(site, TileType::Clear) || GetTileSlope(site) != SLOPE_FLAT) continue;
 				/* The exit has to point back at the track, so the command is given the
 				 * opposite of the step that got us here. Passing `dir` instead aims the
 				 * exit one tile past the track, which is how 368 depots were built, found
 				 * unconnected and taken down again while the log blamed the site rather
 				 * than the direction. */
-				const CommandCost res = Command<CMD_BUILD_TRAIN_DEPOT>::Do(kExec, site, HsbRailType(), ReverseDiagDir(dir));
+				const CommandCost res = Command<Commands::BuildRailDepot>::Do(kExec, site, HsbRailType(), ReverseDiagDir(dir));
 				if (!res.Succeeded()) {
 					if (depot_why == INVALID_STRING_ID) depot_why = res.GetErrorMessage();
 					continue;
@@ -3632,7 +3635,7 @@ uint HsbBuildFreightSidings(uint &depots, uint &stranded)
 			}
 		}
 	}
-	Debug(misc, 0, "hsb: rail freight: {} sidings, {} depots, {} taken down again for want of a "
+	Debug(Facility::Misc, Severity::Critical, "hsb: rail freight: {} sidings, {} depots, {} taken down again for want of a "
 		"connected exit, first refusal: {}", sidings, depots, stranded,
 		depot_why == INVALID_STRING_ID ? std::string("none") : GetString(depot_why));
 	return sidings;
@@ -3670,12 +3673,12 @@ uint HsbBuildStations(uint &towns_without_rail)
 			++towns_without_rail;
 			continue;
 		}
-		const Axis axis = HasTrack(spot, TRACK_X) && !HasTrack(spot, TRACK_Y) ? AXIS_X : AXIS_Y;
+		const Axis axis = HasTrack(spot, Track::X) && !HasTrack(spot, Track::Y) ? Axis::X : Axis::Y;
 		/* No DoCommandFlag::Auto: a tested station command dry-runs its clear-tile
 		 * check, and on a plain track tile that dry run answers "must remove railway
 		 * track first" - which is the one thing a station is *for*. Building for real
 		 * replaces the track, exactly as it does under the player's cursor. */
-		const CommandCost res = Command<CMD_BUILD_RAIL_STATION>::Do(kExec, spot, HsbRailType(), axis, 2, 4,
+		const CommandCost res = Command<Commands::BuildRailStation>::Do(kExec, spot, HsbRailType(), axis, 2, 4,
 			STAT_CLASS_DFLT, 0, StationID::Invalid(), false);
 		if (res.Succeeded()) {
 			/* And the count is of stations that exist and can be used. */
@@ -3683,13 +3686,13 @@ uint HsbBuildStations(uint &towns_without_rail)
 			if (made != nullptr && made->facilities.Test(StationFacility::Train)) {
 				++rail_stations;
 			} else {
-				Debug(misc, 0, "hsb: station at ({},{}) was built but cannot take a train", TileX(spot), TileY(spot));
+				Debug(Facility::Misc, Severity::Critical, "hsb: station at ({},{}) was built but cannot take a train", TileX(spot), TileY(spot));
 			}
 		} else if (station_why == INVALID_STRING_ID) {
 			station_why = res.GetErrorMessage();
 		}
 	}
-	Debug(misc, 0, "hsb: rail: {} stations built, {} towns with no rail within 14 tiles, first refusal: {}",
+	Debug(Facility::Misc, Severity::Critical, "hsb: rail: {} stations built, {} towns with no rail within 14 tiles, first refusal: {}",
 		rail_stations, towns_without_rail,
 		station_why == INVALID_STRING_ID ? std::string("none") : GetString(station_why));
 	return rail_stations;
@@ -3727,7 +3730,7 @@ uint HsbBuildAirports(const std::string &path)
 		for (uint radius = 2; radius <= static_cast<uint>(kHsbSiteSearchRadius.hi) && !found; radius += 2) {
 			for (TileIndex t : SpiralTileSequence(want, radius, 0, 0)) {
 				if (!IsValidTile(t)) continue;
-				if (!Command<CMD_BUILD_AIRPORT>::Do(DoCommandFlag::Auto, t, HsbAirportType(), HsbAirportLayout(),
+				if (!Command<Commands::BuildAirport>::Do(DoCommandFlag::Auto, t, HsbAirportType(), HsbAirportLayout(),
 				                                     StationID::Invalid(), true).Succeeded()) continue;
 				spot = t;
 				found = true;
@@ -3735,17 +3738,17 @@ uint HsbBuildAirports(const std::string &path)
 			}
 		}
 		if (!found) {
-			Debug(misc, 0, "hsb: no room for an airport near '{}' at ({},{})", name, TileX(want), TileY(want));
+			Debug(Facility::Misc, Severity::Critical, "hsb: no room for an airport near '{}' at ({},{})", name, TileX(want), TileY(want));
 			continue;
 		}
-		if (Command<CMD_BUILD_AIRPORT>::Do(kExec, spot, HsbAirportType(), HsbAirportLayout(),
+		if (Command<Commands::BuildAirport>::Do(kExec, spot, HsbAirportType(), HsbAirportLayout(),
 		                                   StationID::Invalid(), true).Succeeded()) {
 			++built;
 		} else {
-			Debug(misc, 0, "hsb: airport '{}' refused at ({},{})", name, TileX(spot), TileY(spot));
+			Debug(Facility::Misc, Severity::Critical, "hsb: airport '{}' refused at ({},{})", name, TileX(spot), TileY(spot));
 		}
 	}
-	Debug(misc, 0, "hsb: airports: {} built", built);
+	Debug(Facility::Misc, Severity::Critical, "hsb: airports: {} built", built);
 	return built;
 }
 
@@ -3765,7 +3768,7 @@ uint HsbBuildHarbours(const std::string &path)
 	std::vector<std::pair<std::string, std::pair<double, double>>> places;
 	if (!HsbReadPlaces(path, "harbours", places)) return 0;
 
-	/* No NoWater here: CMD_BUILD_DOCK's own flags are {Auto} only, and adding the
+	/* No NoWater here: Commands::BuildDock's own flags are {Auto} only, and adding the
 	 * construction flag the road command uses forbids the dock outright ("can't build
 	 * on water") on every tile of the coast. */
 	constexpr DoCommandFlags kExec{DoCommandFlag::Execute, DoCommandFlag::Auto};
@@ -3782,25 +3785,25 @@ uint HsbBuildHarbours(const std::string &path)
 					static const int kOff[4][2] = {{0, -1}, {1, 0}, {0, 1}, {-1, 0}};
 					TileIndex land = t + TileDiffXY(kOff[d][0], kOff[d][1]);
 					if (!IsValidTile(land) || IsWaterTile(land)) continue;
-					if (!Command<CMD_BUILD_DOCK>::Do(DoCommandFlag::Auto, land, StationID::Invalid(), true).Succeeded()) continue;
+					if (!Command<Commands::BuildDock>::Do(DoCommandFlag::Auto, land, StationID::Invalid(), true).Succeeded()) continue;
 					spot = land;
 					found = true;
 				}
 			}
 		}
 		if (!found) {
-			Debug(misc, 0, "hsb: no harbour for '{}' near ({},{})", name, TileX(want), TileY(want));
+			Debug(Facility::Misc, Severity::Critical, "hsb: no harbour for '{}' near ({},{})", name, TileX(want), TileY(want));
 			continue;
 		}
-		CommandCost res = Command<CMD_BUILD_DOCK>::Do(kExec, spot, StationID::Invalid(), true);
+		CommandCost res = Command<Commands::BuildDock>::Do(kExec, spot, StationID::Invalid(), true);
 		if (res.Succeeded()) {
 			++built;
 		} else {
-			Debug(misc, 0, "hsb: harbour '{}' found a spot at ({},{}) but the build refused: {}",
+			Debug(Facility::Misc, Severity::Critical, "hsb: harbour '{}' found a spot at ({},{}) but the build refused: {}",
 				name, TileX(spot), TileY(spot), HsbWhy(res));
 		}
 	}
-	Debug(misc, 0, "hsb: harbours: {} docks built", built);
+	Debug(Facility::Misc, Severity::Critical, "hsb: harbours: {} docks built", built);
 	return built;
 }
 
@@ -3824,7 +3827,7 @@ CompanyID HsbBorrowCompany()
 {
 	Company *company = DoStartupNewCompany(true);
 	if (company == nullptr) {
-		Debug(misc, 0, "hsb: no company slot to borrow - the network cannot be built");
+		Debug(Facility::Misc, Severity::Critical, "hsb: no company slot to borrow - the network cannot be built");
 		return CompanyID::Invalid();
 	}
 	g_hsb_net.network_company = company->index;
@@ -3844,7 +3847,7 @@ CompanyID HsbBorrowCompany()
 	 * whole reason the bus service came up with no bus engine and no explanation. */
 	company->avail_railtypes = GetCompanyRailTypes(company->index);
 	company->avail_roadtypes = GetCompanyRoadTypes(company->index);
-	Debug(misc, 0, "hsb: borrowed company {} with {} cash", company->index.base(), g_hsb_net.money);
+	Debug(Facility::Misc, Severity::Critical, "hsb: borrowed company {} with {} cash", company->index.base(), g_hsb_net.money);
 	return company->index;
 }
 
@@ -3857,7 +3860,7 @@ CompanyID HsbBorrowCompany()
  * IsEngineBuildable() refuses all of them - the symptom being a scenario with depots
  * and no vehicles, and no reason printed by the engine at all.
  *
- * The scenario editor does the per-company part with CMD_ENGINE_CTRL, and the
+ * The scenario editor does the per-company part with Commands::EngineControl, and the
  * command it calls is one line: set this company's bit in the engine's availability
  * mask. World generation does not do it - the masks are per company and this company
  * did not exist when they were filled in.
@@ -3878,7 +3881,7 @@ bool HsbBuildRequested()
 	static bool done = false;
 	if (done) return false;
 	if (HsbManifestPath() == nullptr) return false;
-	if (_game_mode != GM_EDITOR || _switch_mode != SM_NONE) return false;
+	if (_game_mode != GameMode::Editor || _switch_mode != SwitchMode::None) return false;
 	done = true;
 	return true;
 }
@@ -3896,14 +3899,14 @@ bool HsbBuildScenario()
 
 	std::ifstream manifest_file(manifest_path);
 	if (!manifest_file) {
-		Debug(misc, 0, "hsb: cannot open manifest {}", manifest_path);
+		Debug(Facility::Misc, Severity::Critical, "hsb: cannot open manifest {}", manifest_path);
 		return false;
 	}
 	nlohmann::json manifest;
 	try {
 		manifest_file >> manifest;
 	} catch (nlohmann::json::exception &e) {
-		Debug(misc, 0, "hsb: manifest parse error: {}", e.what());
+		Debug(Facility::Misc, Severity::Critical, "hsb: manifest parse error: {}", e.what());
 		return false;
 	}
 	if (!manifest.is_object() || !HsbParseBounds(manifest)) return false;
@@ -3925,7 +3928,7 @@ bool HsbBuildScenario()
 		if (!manifest.at("heightmap").is_string() || !manifest.at("towns").is_string()
 				|| !manifest.at("industries").is_string() || !manifest.at("start_year").is_number_integer()
 				|| !manifest.at("save").is_string()) {
-			Debug(misc, 0, "hsb: manifest fields have invalid types");
+			Debug(Facility::Misc, Severity::Critical, "hsb: manifest fields have invalid types");
 			return false;
 		}
 		heightmap = manifest.at("heightmap").get<std::string>();
@@ -3958,7 +3961,7 @@ bool HsbBuildScenario()
 		rotation = !manifest.contains("heightmap_rotation") || manifest.at("heightmap_rotation").is_null() ? "clockwise" : manifest.at("heightmap_rotation").get<std::string>();
 		currency = !manifest.contains("currency") || manifest.at("currency").is_null() ? "" : manifest.at("currency").get<std::string>();
 	} catch (nlohmann::json::exception &e) {
-		Debug(misc, 0, "hsb: invalid manifest fields: {}", e.what());
+		Debug(Facility::Misc, Severity::Critical, "hsb: invalid manifest fields: {}", e.what());
 		return false;
 	}
 	if (heightmap.empty() || towns.empty() || industries_path.empty() || !HsbSafeFilename(save)
@@ -3967,14 +3970,14 @@ bool HsbBuildScenario()
 			|| !std::filesystem::path(industries_path).is_absolute()
 			|| !HsbSafeFilename(BasenameOf(heightmap))
 			|| !HsbSafeFilename(BasenameOf(towns))) {
-		Debug(misc, 0, "hsb: manifest paths or save filename are invalid");
+		Debug(Facility::Misc, Severity::Critical, "hsb: manifest paths or save filename are invalid");
 		return false;
 	}
 	if (start_year < 0 || start_year > 5'000'000 || heightmap_height < 1 || heightmap_height > static_cast<int>(MAX_TILE_HEIGHT)
 			|| snow_line_height < 0 || snow_line_height > static_cast<int>(MAX_TILE_HEIGHT)
 			|| industry_search_radius < 1 || industry_search_radius > 512 || generation_seed == UINT32_MAX
 			|| max_loan < 0 || max_loan > 4'000'000'000 || competitors < 0 || competitors > 15) {
-		Debug(misc, 0, "hsb: manifest year, height, snow line, industry radius, loan, or competitors is out of range");
+		Debug(Facility::Misc, Severity::Critical, "hsb: manifest year, height, snow line, industry radius, loan, or competitors is out of range");
 		return false;
 	}
 	g_hsb_industry_radius = static_cast<uint>(industry_search_radius);
@@ -3983,7 +3986,7 @@ bool HsbBuildScenario()
 	} else if (rotation == "counter-clockwise" || rotation == "counter_clockwise" || rotation == "counterclockwise") {
 		g_hsb_counter_clockwise = true;
 	} else {
-		Debug(misc, 0, "hsb: unknown heightmap_rotation '{}', want clockwise or counter-clockwise", rotation);
+		Debug(Facility::Misc, Severity::Critical, "hsb: unknown heightmap_rotation '{}', want clockwise or counter-clockwise", rotation);
 		return false;
 	}
 
@@ -4007,15 +4010,15 @@ bool HsbBuildScenario()
 	 * save is invisible to every headless gate. */
 	if (!currency.empty()) {
 		bool found = false;
-		for (uint8_t i = 0; i < CURRENCY_END; i++) {
-			if (currency == _currency_specs[i].code) {
-				_settings_newgame.locale.currency = i;
+		for (uint8_t i = 0; i < to_underlying(Currency::End); i++) {
+			if (currency == _currency_specs[static_cast<Currency>(i)].code) {
+				_settings_newgame.locale.currency = static_cast<Currency>(i);
 				found = true;
 				break;
 			}
 		}
 		if (!found) {
-			Debug(misc, 0, "hsb: unknown currency code '{}'", currency);
+			Debug(Facility::Misc, Severity::Critical, "hsb: unknown currency code '{}'", currency);
 			return false;
 		}
 	}
@@ -4066,13 +4069,13 @@ bool HsbBuildScenario()
 
 	/* 1. Terrain: same as the GUI heightmap flow (dimensions from the PNG). */
 	uint dim_x = 0, dim_y = 0;
-	if (!GetHeightmapDimensions(DFT_HEIGHTMAP_PNG, BasenameOf(heightmap), &dim_x, &dim_y)) {
-		Debug(misc, 0, "hsb: cannot read heightmap {}", heightmap);
+	if (!GetHeightmapDimensions(DetailedFileType::HeightmapPng, BasenameOf(heightmap), &dim_x, &dim_y)) {
+		Debug(Facility::Misc, Severity::Critical, "hsb: cannot read heightmap {}", heightmap);
 		return false;
 	}
 	if (!HsbIsPowerOfTwo(dim_x, MIN_MAP_SIZE, MAX_MAP_SIZE)
 			|| !HsbIsPowerOfTwo(dim_y, MIN_MAP_SIZE, MAX_MAP_SIZE) || dim_x != dim_y) {
-		Debug(misc, 0, "hsb: heightmap must be square powers of 2 in 64..4096, got {}x{}", dim_x, dim_y);
+		Debug(Facility::Misc, Severity::Critical, "hsb: heightmap must be square powers of 2 in 64..4096, got {}x{}", dim_x, dim_y);
 		return false;
 	}
 	/* Newgame settings: GenerateWorld resets _settings_game from these, so
@@ -4085,8 +4088,8 @@ bool HsbBuildScenario()
 	 * to at least 2 (snow on the highest land only). */
 	if (snow_line_height > 0) _settings_newgame.game_creation.snow_line_height = static_cast<uint8_t>(std::max(snow_line_height, 2));
 	_file_to_saveload.name = BasenameOf(heightmap);
-	_file_to_saveload.ftype = FiosType{FT_HEIGHTMAP, DFT_HEIGHTMAP_PNG};
-	Debug(misc, 0, "hsb: generating {}x{} terrain, height {} rotation {}", dim_x, dim_y, heightmap_height, rotation);
+	_file_to_saveload.ftype = FiosType{AbstractFileType::Heightmap, DetailedFileType::HeightmapPng};
+	Debug(Facility::Misc, Severity::Critical, "hsb: generating {}x{} terrain, height {} rotation {}", dim_x, dim_y, heightmap_height, rotation);
 	GenerateWorld(GWM_HEIGHTMAP, dim_x, dim_y);
 
 	/* Date FIRST, before any content: industries and closures track unserved time
@@ -4105,30 +4108,30 @@ bool HsbBuildScenario()
 	size_t towns_before = Town::GetNumItems();
 	LoadTownData();
 	size_t towns_placed = Town::GetNumItems() - towns_before;
-	Debug(misc, 0, "hsb: towns placed: {}/{}", towns_placed, expected_towns);
+	Debug(Facility::Misc, Severity::Critical, "hsb: towns placed: {}/{}", towns_placed, expected_towns);
 	for (const Sign *s : Sign::Iterate()) {
-		Debug(misc, 0, "hsb: town fallback sign: {} at {},{}", s->name, s->x, s->y);
+		Debug(Facility::Misc, Severity::Critical, "hsb: town fallback sign: {} at {},{}", s->name, s->x, s->y);
 	}
 	if (towns_placed != expected_towns) {
-		Debug(misc, 0, "hsb: town import incomplete, aborting");
+		Debug(Facility::Misc, Severity::Critical, "hsb: town import incomplete, aborting");
 		return false;
 	}
 
 	/* 3. Industries: resolve types by display name, place at anchors. */
 	std::ifstream ind_file(industries_path);
 	if (!ind_file) {
-		Debug(misc, 0, "hsb: cannot open {}", industries_path);
+		Debug(Facility::Misc, Severity::Critical, "hsb: cannot open {}", industries_path);
 		return false;
 	}
 	nlohmann::json ind_json;
 	try {
 		ind_file >> ind_json;
 	} catch (nlohmann::json::exception &e) {
-		Debug(misc, 0, "hsb: industries parse error: {}", e.what());
+		Debug(Facility::Misc, Severity::Critical, "hsb: industries parse error: {}", e.what());
 		return false;
 	}
 	if (!ind_json.is_array()) {
-		Debug(misc, 0, "hsb: industries root must be an array");
+		Debug(Facility::Misc, Severity::Critical, "hsb: industries root must be an array");
 		return false;
 	}
 
@@ -4138,9 +4141,9 @@ bool HsbBuildScenario()
 		if (!spec->enabled) continue;
 		by_name.emplace(GetString(spec->name), it);
 	}
-	Debug(misc, 0, "hsb: {} industry types available", by_name.size());
+	Debug(Facility::Misc, Severity::Critical, "hsb: {} industry types available", by_name.size());
 	for (const auto &named : by_name) {
-		Debug(misc, 0, "hsb: available industry '{}'", named.first);
+		Debug(Facility::Misc, Severity::Critical, "hsb: available industry '{}'", named.first);
 	}
 
 	uint placed = 0, failed = 0, idx = 0;
@@ -4165,7 +4168,7 @@ bool HsbBuildScenario()
 						|| !entry.contains("lat") || !entry.at("lat").is_number()
 						|| !entry.contains("lon") || !entry.at("lon").is_number()
 						|| (entry.contains("near") && !entry.at("near").is_string())) {
-					Debug(misc, 0, "hsb: invalid industry entry schema");
+					Debug(Facility::Misc, Severity::Critical, "hsb: invalid industry entry schema");
 					return false;
 				}
 				const std::string type = entry.at("type").get<std::string>();
@@ -4173,12 +4176,12 @@ bool HsbBuildScenario()
 				const double lon = entry.at("lon").get<double>();
 				const std::string near = entry.contains("near") ? entry.at("near").get<std::string>() : type;
 				if (type.empty() || !HsbCoordinateInBounds(g_hsb_bounds, lat, lon)) {
-					Debug(misc, 0, "hsb: invalid industry type or coordinates");
+					Debug(Facility::Misc, Severity::Critical, "hsb: invalid industry type or coordinates");
 					return false;
 				}
 				auto it = by_name.find(type);
 				if (it == by_name.end()) {
-					Debug(misc, 0, "hsb: unknown industry type '{}' near {}", type, near);
+					Debug(Facility::Misc, Severity::Critical, "hsb: unknown industry type '{}' near {}", type, near);
 					++failed;
 					continue;
 				}
@@ -4187,7 +4190,7 @@ bool HsbBuildScenario()
 				std::string nearest_name = (nearest == nullptr) ? "<none>" : nearest->name;
 				bool ok = false;
 				std::map<std::string, uint> err_counts;
-				CommandCost anchor_result = Command<CMD_BUILD_INDUSTRY>::Do(DoCommandFlag::Execute, target, it->second, 0, false, idx);
+				CommandCost anchor_result = Command<Commands::BuildIndustry>::Do(DoCommandFlag::Execute, target, it->second, 0, false, idx);
 				if (anchor_result.Succeeded()) {
 					ok = true;
 				} else {
@@ -4195,7 +4198,7 @@ bool HsbBuildScenario()
 				}
 				if (!ok) {
 					for (TileIndex t : SpiralTileSequence(target, g_hsb_industry_radius, 0, 0)) {
-						CommandCost res = Command<CMD_BUILD_INDUSTRY>::Do(DoCommandFlag::Execute, t, it->second, 0, false, idx);
+						CommandCost res = Command<Commands::BuildIndustry>::Do(DoCommandFlag::Execute, t, it->second, 0, false, idx);
 						if (res.Succeeded()) {
 							ok = true;
 							break;
@@ -4212,18 +4215,18 @@ bool HsbBuildScenario()
 						top += std::to_string(kv.second) + "x " + kv.first;
 						if (top.size() > 200) break;
 					}
-					Debug(misc, 0, "hsb: could not place '{}' near {} (tile {},{} nearest town {}): {}", type, near,
+					Debug(Facility::Misc, Severity::Critical, "hsb: could not place '{}' near {} (tile {},{} nearest town {}): {}", type, near,
 						TileX(target), TileY(target), nearest_name, top);
 					++failed;
 				}
 			}
 		} catch (nlohmann::json::exception &e) {
-			Debug(misc, 0, "hsb: invalid industry entry: {}", e.what());
+			Debug(Facility::Misc, Severity::Critical, "hsb: invalid industry entry: {}", e.what());
 			return false;
 		}
 	}   /* _current_company, _generating_world and _ignore_industry_restrictions restored */
 
-	Debug(misc, 0, "hsb: industries placed {}/{}, failed {}", placed, ind_json.size(), failed);
+	Debug(Facility::Misc, Severity::Critical, "hsb: industries placed {}/{}, failed {}", placed, ind_json.size(), failed);
 	HsbLogIndustries("after placing industries");
 	if (failed > 0) return false;
 	/* 3b. Network: roads, rail, airports, docks and a starting fleet.
@@ -4243,7 +4246,7 @@ bool HsbBuildScenario()
 		/* Log the *live* settings, not the newgame ones: these were set before
 		 * GenerateWorld, and the gap between the two blocks is exactly the bug this
 		 * comment exists to prevent. */
-		Debug(misc, 0, "hsb: live settings: build_on_slopes {} autoslope {} crossings_with_competitor {} "
+		Debug(Facility::Misc, Severity::Critical, "hsb: live settings: build_on_slopes {} autoslope {} crossings_with_competitor {} "
 			"road_stop_on_town_road {}; rail type {}, road type {}",
 			_settings_game.construction.build_on_slopes ? "on" : "OFF",
 			_settings_game.construction.autoslope ? "on" : "OFF",
@@ -4262,9 +4265,9 @@ bool HsbBuildScenario()
 			const TileIndex tl = TileXY(std::max<int>(TileX(center) - half, 1), std::max<int>(TileY(center) - half, 1));
 			const TileIndex br = TileXY(std::min<int>(TileX(center) + half, Map::SizeX() - 2),
 			                             std::min<int>(TileY(center) + half, Map::SizeY() - 2));
-			if (Command<CMD_PLANT_TREE>::Do(DoCommandFlag::Execute, tl, br, TREE_INVALID, false).Succeeded()) ++forest_blocks;
+			if (Command<Commands::PlantTree>::Do(DoCommandFlag::Execute, tl, br, TREE_INVALID, false).Succeeded()) ++forest_blocks;
 		}
-		Debug(misc, 0, "hsb: forest blocks planted: {}", forest_blocks);
+		Debug(Facility::Misc, Severity::Critical, "hsb: forest blocks planted: {}", forest_blocks);
 		HsbLogIndustries("after trees");
 
 		/* Roads. Four layers, all routed by HsbRouteRoad - long straight legs joined
@@ -4283,28 +4286,28 @@ bool HsbBuildScenario()
 			std::vector<std::vector<std::pair<double, double>>> corridors;
 			if (!HsbReadCorridors(g_hsb_net.autobahnen, "autobahnen", corridors)) return false;
 			const uint segments = HsbRouteCorridors(corridors, road_routed, road_snapped, road_unsnappable, retry_links);
-			Debug(misc, 0, "hsb: trunk corridors: {} segments ok", segments);
+			Debug(Facility::Misc, Severity::Critical, "hsb: trunk corridors: {} segments ok", segments);
 			HsbLogIndustries("after trunk corridors");
 		}
 		if (!g_hsb_net.roads.empty()) {
 			std::vector<std::vector<std::pair<double, double>>> corridors;
 			if (!HsbReadCorridors(g_hsb_net.roads, "roads", corridors)) return false;
 			const uint segments = HsbRouteCorridors(corridors, road_routed, road_snapped, road_unsnappable, retry_links);
-			Debug(misc, 0, "hsb: town network: {} segments ok", segments);
+			Debug(Facility::Misc, Severity::Critical, "hsb: town network: {} segments ok", segments);
 			HsbLogIndustries("after town network");
 		}
 		uint spur_ok = 0, spur_missed = 0;
 		HsbBuildIndustrySpurs(spur_ok, spur_missed);
-		Debug(misc, 0, "hsb: industry spurs: {} built, {} missed", spur_ok, spur_missed);
+		Debug(Facility::Misc, Severity::Critical, "hsb: industry spurs: {} built, {} missed", spur_ok, spur_missed);
 		HsbLogIndustries("after industry spurs");
 
 		const uint pruned = HsbPruneDeadEnds();
-		Debug(misc, 0, "hsb: dead-end road tiles pruned: {}", pruned);
+		Debug(Facility::Misc, Severity::Critical, "hsb: dead-end road tiles pruned: {}", pruned);
 		const uint still_unrouted = HsbRetryRoadLinks(retry_links);
-		Debug(misc, 0, "hsb: road links unrouted after retries: {}", still_unrouted);
+		Debug(Facility::Misc, Severity::Critical, "hsb: road links unrouted after retries: {}", still_unrouted);
 		HsbJoinTownsToTrunk();
 		HsbJoinRoadFragments();
-		Debug(misc, 0, "hsb: road endpoints snapped out of towns: {}, unsnappable: {}", road_snapped, road_unsnappable);
+		Debug(Facility::Misc, Severity::Critical, "hsb: road endpoints snapped out of towns: {}, unsnappable: {}", road_snapped, road_unsnappable);
 		HsbLogIndustries("after road network");
 
 		/* Rail: main lines from the data, then a station where a line meets a town,
@@ -4327,14 +4330,14 @@ bool HsbBuildScenario()
 					have_prev = true;
 				}
 			}
-			Debug(misc, 0, "hsb: rail: {} lines routed, {} failed", rail_routed, rail_failed);
+			Debug(Facility::Misc, Severity::Critical, "hsb: rail: {} lines routed, {} failed", rail_routed, rail_failed);
 			HsbLogIndustries("after rail track");
 
 			uint towns_without_rail = 0;
 			const uint rail_stations = HsbBuildStations(towns_without_rail);
 			uint depots = 0, stranded = 0;
 			const uint sidings = HsbBuildFreightSidings(depots, stranded);
-			Debug(misc, 0, "hsb: rail totals: {} lines, {} stations, {} sidings, {} depots ({} taken down again)",
+			Debug(Facility::Misc, Severity::Critical, "hsb: rail totals: {} lines, {} stations, {} sidings, {} depots ({} taken down again)",
 				rail_routed, rail_stations, sidings, depots, stranded);
 			HsbLogIndustries("after rail freight");
 
@@ -4346,7 +4349,7 @@ bool HsbBuildScenario()
 				HsbBuildBusService(service, g_hsb_net.bus_towns);
 				HsbBuildStationTrains(service, g_hsb_net.trains);
 			} else {
-				Debug(misc, 0, "hsb: fleet not requested; the network is built but nothing runs on it");
+				Debug(Facility::Misc, Severity::Critical, "hsb: fleet not requested; the network is built but nothing runs on it");
 			}
 		}
 
@@ -4372,7 +4375,7 @@ bool HsbBuildScenario()
 			owner->money = 0;
 			owner->current_loan = 0;
 			_current_company = _local_company = CompanyID::Invalid();
-			Debug(misc, 0, "hsb: keeping the infrastructure company (id {}) in the save", owner->index.base());
+			Debug(Facility::Misc, Severity::Critical, "hsb: keeping the infrastructure company (id {}) in the save", owner->index.base());
 		}
 	}
 
@@ -4391,7 +4394,7 @@ bool HsbBuildScenario()
 	 * industry that a road bulldozed, a start view on the empty map corner. */
 	if (HsbNetworkIsRequested()) {
 		const uint companies = Company::GetNumItems();
-		Debug(misc, 0, "hsb: companies in the save: {} (must be 1: the network owner, with a slot left free for the player)", companies);
+		Debug(Facility::Misc, Severity::Critical, "hsb: companies in the save: {} (must be 1: the network owner, with a slot left free for the player)", companies);
 		if (companies != 1) {
 			/* Name them. "found 2" is a number; which one is the intruder, and whether
 			 * it is the network's owner or something the engine created behind our
@@ -4401,15 +4404,15 @@ bool HsbBuildScenario()
 				for (const Vehicle *v : Vehicle::Iterate()) {
 					if (v->owner == c->index) ++vehicles;
 				}
-				Debug(misc, 0, "hsb:   company {} '{}' is_ai {} money {} vehicles {}",
+				Debug(Facility::Misc, Severity::Critical, "hsb:   company {} '{}' is_ai {} money {} vehicles {}",
 					c->index.base(), c->name, c->is_ai ? "yes" : "NO",
 					static_cast<int64_t>(c->money), vehicles);
 			}
-			Debug(misc, 0, "hsb: ERROR - expected exactly one company (the network owner), found {}", companies);
+			Debug(Facility::Misc, Severity::Critical, "hsb: ERROR - expected exactly one company (the network owner), found {}", companies);
 			return false;
 		}
 		if (_settings_game.difficulty.max_no_competitors < 2) {
-			Debug(misc, 0, "hsb: ERROR - only {} company slot(s): the player would have nowhere to start",
+			Debug(Facility::Misc, Severity::Critical, "hsb: ERROR - only {} company slot(s): the player would have nowhere to start",
 				_settings_game.difficulty.max_no_competitors);
 			return false;
 		}
@@ -4426,9 +4429,9 @@ bool HsbBuildScenario()
 				else continue;
 				if (v->IsStoppedInDepot()) ++parked;
 			}
-			Debug(misc, 0, "hsb: fleet: {} consist(s), {} with a route, {} of those still parked in a depot", primaries, routed, parked);
+			Debug(Facility::Misc, Severity::Critical, "hsb: fleet: {} consist(s), {} with a route, {} of those still parked in a depot", primaries, routed, parked);
 			if (routed == 0) {
-				Debug(misc, 0, "hsb: ERROR - the scenario ships no running service");
+				Debug(Facility::Misc, Severity::Critical, "hsb: ERROR - the scenario ships no running service");
 				return false;
 			}
 			/* Having orders is not the same as running. A consist that is still in its
@@ -4436,7 +4439,7 @@ bool HsbBuildScenario()
 			 * nothing pressed the start button. That is a silent failure: every earlier
 			 * check passed, and the map is a museum. */
 			if (parked > 0) {
-				Debug(misc, 0, "hsb: ERROR - {} routed consist(s) never left the depot; the scenario would load as a museum", parked);
+				Debug(Facility::Misc, Severity::Critical, "hsb: ERROR - {} routed consist(s) never left the depot; the scenario would load as a museum", parked);
 				return false;
 			}
 		}
@@ -4445,9 +4448,9 @@ bool HsbBuildScenario()
 		 * rail line levelled through one. Both now refuse rather than demolish, so the
 		 * design total has to survive to the save or the build says so. */
 		const uint alive = HsbCountIndustries();
-		Debug(misc, 0, "hsb: pre-save industry count: {} of {} designed", alive, ind_json.size());
+		Debug(Facility::Misc, Severity::Critical, "hsb: pre-save industry count: {} of {} designed", alive, ind_json.size());
 		if (alive < ind_json.size()) {
-			Debug(misc, 0, "hsb: ERROR - {} of {} designed industries did not survive the build",
+			Debug(Facility::Misc, Severity::Critical, "hsb: ERROR - {} of {} designed industries did not survive the build",
 				ind_json.size() - alive, ind_json.size());
 			return false;
 		}
@@ -4457,16 +4460,16 @@ bool HsbBuildScenario()
 		 * fails instead of shipping it. */
 		HsbChooseStartView();
 		if (_hsb_start_view_tile == INVALID_TILE) {
-			Debug(misc, 0, "hsb: ERROR - no start view tile was chosen, the player would open on the empty map corner");
+			Debug(Facility::Misc, Severity::Critical, "hsb: ERROR - no start view tile was chosen, the player would open on the empty map corner");
 			return false;
 		}
-		Debug(misc, 0, "hsb: start view tile is valid: ({},{})", TileX(_hsb_start_view_tile), TileY(_hsb_start_view_tile));
+		Debug(Facility::Misc, Severity::Critical, "hsb: start view tile is valid: ({},{})", TileX(_hsb_start_view_tile), TileY(_hsb_start_view_tile));
 	}
 
-	if (SaveOrLoad(save, SLO_SAVE, DFT_GAME_FILE, SCENARIO_DIR, false) != SL_OK) {
-		Debug(misc, 0, "hsb: save failed");
+	if (SaveOrLoad(save, SaveLoadOperation::Save, DetailedFileType::GameFile, Subdirectory::Scenario, false) != SaveLoadResult::Ok) {
+		Debug(Facility::Misc, Severity::Critical, "hsb: save failed");
 		return false;
 	}
-	Debug(misc, 0, "hsb: saved {}", save);
+	Debug(Facility::Misc, Severity::Critical, "hsb: saved {}", save);
 	return true;
 }

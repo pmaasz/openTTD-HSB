@@ -49,7 +49,7 @@ fi
 clean_upstream()
 {
   git -C "$DIR" reset -q >/dev/null 2>&1 || :
-  git -C "$DIR" checkout -- src/CMakeLists.txt src/genworld.cpp src/openttd.cpp src/rail.cpp \
+  git -C "$DIR" checkout -- src/CMakeLists.txt src/openttd.cpp src/rail.cpp \
       src/saveload/misc_sl.cpp src/tests/CMakeLists.txt >/dev/null 2>&1 || :
   rm -f "$DIR/src/hsb_builder.h" "$DIR/src/hsb_builder.cpp" "$DIR/src/hsb_builder_math.h" \
         "$DIR/src/hsb_builder_net.h" >/dev/null 2>&1 || :
@@ -143,7 +143,7 @@ new_rail = """bool HasRailTypeAvail(const CompanyID company, const RailType rail
 \t * handled. Without it here, ValParamRailType() reads through a company that
 \t * does not exist yet and building the first rail tile in a scenario
 \t * segfaults - which is what the headless builder does. */
-\tif (company == OWNER_DEITY || company == OWNER_TOWN || _game_mode == GM_EDITOR || _generating_world) {
+\tif (company == OWNER_DEITY || company == OWNER_TOWN || _game_mode == GameMode::Editor || _generating_world) {
 \t\treturn railtype < RAILTYPE_END && !_railtypes_hidden_mask.Test(railtype) &&
 \t\t       GetRailTypeInfo(railtype)->label != 0;
 \t}
@@ -181,12 +181,12 @@ s = s.replace(old_zoom, new_zoom, 1)
 old_save = """void SaveViewportBeforeSaveGame()
 {
 \t/* Don't use GetMainWindow() in case the window does not exist. */
-\tconst Window *w = FindWindowById(WC_MAIN_WINDOW, 0);
+\tconst Window *w = FindWindowById(WindowClass::MainWindow, 0);
 """
 new_save = """void SaveViewportBeforeSaveGame()
 {
 \t/* Don't use GetMainWindow() in case the window does not exist. */
-\tconst Window *w = FindWindowById(WC_MAIN_WINDOW, 0);
+\tconst Window *w = FindWindowById(WindowClass::MainWindow, 0);
 
 \t/* The headless builder asks for a specific opening view, and it asks for it
 \t * here rather than in ResetViewportAfterLoadGame() because that is the only
@@ -207,7 +207,7 @@ new_save = """void SaveViewportBeforeSaveGame()
 \t\t_saved_scrollpos_x = pt.x - 320 * ZOOM_BASE;
 \t\t_saved_scrollpos_y = pt.y - 200 * ZOOM_BASE;
 \t\t_saved_scrollpos_zoom = ZoomLevel::Normal;
-\t\tDebug(sl, 0, "hsb: saving start view for tile ({},{}): 2D ({},{}), scrollpos ({},{}), zoom {}",
+\t\tDebug(Facility::Sl, Severity::Critical, "hsb: saving start view for tile ({},{}): 2D ({},{}), scrollpos ({},{}), zoom {}",
 \t\t      TileX(_hsb_start_view_tile), TileY(_hsb_start_view_tile),
 \t\t      pt.x, pt.y, _saved_scrollpos_x, _saved_scrollpos_y, _saved_scrollpos_zoom);
 \t\treturn;
@@ -216,13 +216,8 @@ new_save = """void SaveViewportBeforeSaveGame()
 assert old_save in s, "SaveViewportBeforeSaveGame anchor not found"
 r.write_text(s.replace(old_save, new_save, 1))
 
-r = upstream / "src" / "genworld.cpp"
-s = r.read_text()
-old_mapping = "target_tile = TileXY((1 - y_proportion * Map::MaxX()), x_proportion * Map::MaxY());"
-new_mapping = "target_tile = TileXY((1.0 - y_proportion) * Map::MaxX(), x_proportion * Map::MaxY());"
-assert old_mapping in s, "counter-clockwise town mapping anchor not found"
-s = s.replace(old_mapping, new_mapping)
-r.write_text(s)
+# The counter-clockwise town mapping bug this patch used to fix is fixed
+# upstream in 16.0 (TranslateCoordinates), so there is no genworld edit here.
 q = upstream / "src" / "CMakeLists.txt"
 u = q.read_text()
 old_cmake = "    genworld.cpp\n    genworld.h\n    genworld_gui.cpp"

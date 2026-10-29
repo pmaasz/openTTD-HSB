@@ -20,7 +20,7 @@ else
   echo "[fetch-upstream] MISMATCH: expected $want" >&2
   exit 1
 fi
-for f in src/openttd.cpp src/CMakeLists.txt src/genworld.cpp; do
+for f in src/openttd.cpp src/CMakeLists.txt src/rail.cpp src/saveload/misc_sl.cpp; do
   [ -f "$DIR/$f" ] || { echo "[fetch-upstream] missing $f" >&2; exit 1; }
 done
 echo "[fetch-upstream] key files present"

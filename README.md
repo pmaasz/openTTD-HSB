@@ -11,7 +11,7 @@ License: GPLv2 (see `LICENSE.md`) to match OpenTTD.
 ## Repo layout
 
 ```text
-/openttd-upstream/          # git submodule, pinned (see openttd-upstream.PIN, tag 15.3)
+/openttd-upstream/          # git submodule, pinned (see openttd-upstream.PIN, tag 16.0-beta5)
 /builder/
   hsb_builder.h
   hsb_builder.cpp           # source of truth (GPLv2)
