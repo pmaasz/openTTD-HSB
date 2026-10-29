@@ -1210,8 +1210,7 @@ bool HsbNetworkIsRequested()
  * Read one optional absolute input path.
  *
  * Absent and explicit null both mean "this phase is off"; an empty string is
- * rejected rather than treated as absent, because a script that builds a path
- * and gets it wrong should say so rather than silently skip a phase.
+ * treated as absent (phase skipped).
  */
 bool HsbOptionalPath(const nlohmann::json &manifest, const char *key, std::string &out)
 {
