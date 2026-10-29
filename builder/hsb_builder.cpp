@@ -3082,7 +3082,17 @@ void HsbBuildBusService(HsbServiceCounts &counts, uint max_towns)
 			if (too_close) continue;
 			/* A drive-through stop faces along the road, so it needs the diagonal that
 			 * road runs in. */
-			const DiagDirection dir = DiagDirection::SE;
+			const RoadBits rbits = GetRoadBits(road, RoadTramType::Road);
+			DiagDirection dir = DiagDirection::SE;
+			if (rbits == ROAD_X) {
+				dir = DiagDirection::NE;
+			} else if (rbits == ROAD_Y) {
+				dir = DiagDirection::SE;
+			} else {
+				/* Fallback: pick a diagonal matching the road axis if possible. */
+				if ((rbits & ROAD_X).Any()) dir = DiagDirection::NE;
+				else dir = DiagDirection::SE;
+			}
 			const CommandCost res = Command<Commands::BuildRoadStop>::Do(kExec, road, 1, 1, RoadStopType::Bus, true,
 				dir, HsbRoadType(), ROADSTOP_CLASS_DFLT, 0, StationID::Invalid(), true);
 			if (res.Succeeded()) { stops.push_back(road); ++counts.bus_stops; }
