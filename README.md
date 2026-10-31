@@ -111,36 +111,6 @@ Formats: `docs/FORMATS.md`.
 Release notes: `CHANGELOG.md`.
 AI agents: `mcp/` (MCP server, 10 tools).
 
-## Does the build actually work?
-
-Exit 0 only means it ran. The build logs a measurement of what it produced
-(illustrative numbers for a 4096 map, not a recorded run):
-
-```text
-hsb: audit: towns=124 towns_on_water=0 industries=73 water=2810000
-  sea_fraction=0.168 water_bodies=41 isolated_water_tiles=2
-  water_unreachable=310 carved=18800 carved_reachable=18800
-hsb: network audit: roads=73226 orphan_roads=0 road_components=1
-  largest_road=71890 towns=124 towns_on_network=124 rail=259
-  rail_components=37 stations=61 stations_with_rail=61 bus_stops=48
-  depots=48 airports=27 docks=21 vehicles=35 consists=35
-  vehicles_routed=35 vehicles_parked=0
-hsb: intercity road: a bus from the largest town (pop 1222) reaches 124 of 124 towns
-```
-
-`towns_on_water` must be 0, `carved_reachable` should equal `carved`, and
-`vehicles_parked` must be 0 — a gap in the first means part of the river is a
-closed pond no ship can enter, and a nonzero third means the fleet has routes
-and will still never move. The network line is **absent** when no network file
-is named, so a gate can tell a terrain-only build from one that ran the network.
-`mcp/` returns all of it as `run_builder`'s `audit` field, with the network keys
-prefixed `network_`.
-
-`HSB_TUNE_ROAD_RUN`, `HSB_TUNE_ROAD_SNAP`, `HSB_TUNE_CORNER_FAN` and
-`HSB_TUNE_ROAD_TRACE` tune the routers; `HSB_DUMP_NETWORK=<path>` writes the
-network as a character grid, one character per 4×4 tiles, because a number
-cannot show that a corridor runs through the middle of nowhere.
-
 ## Principles
 
 1. Minimal C++ fork, maximal data-driven content (easy upstream merges).
